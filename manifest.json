@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Shift Grabber v7.16 — Extension (Licensed)",
+  "version": "1.0.2",
+  "description": "5-min burst reloads across all AtoZ tabs, longest-first Add Shift + auto confirm, stay-logged-in, pause/override, multi-date opener, realtime HUD. Protected by license.",
+  "permissions": ["tabs", "storage", "scripting", "alarms"],
+  "host_permissions": [
+    "https://atoz.amazon.work/*",
+    "https://shift-grabber.vercel.app/*",
+    "https://api.telegram.org/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "action": {
+    "default_title": "Shift Grabber Control",
+    "default_popup": "popup/index.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sounds/click.mp3.mp3"],
+      "matches": ["https://atoz.amazon.work/*"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://atoz.amazon.work/*"],
+      "js": ["src/content/main.js"],
+      "run_at": "document_end"
+    }
+  ]
+}

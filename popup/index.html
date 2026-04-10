@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Shift Grabber</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="header">
+      <div class="brand">SG <span class="version">· V7</span></div>
+      <div id="statusBadge" class="badge off">OFF</div>
+    </div>
+
+    <section class="card">
+      <div class="row">
+        <label class="switch">
+          <input id="enableToggle" type="checkbox">
+          <span class="slider"></span>
+        </label>
+        <div class="label">
+          <div class="title">Enable Extension</div>
+          <div class="desc">Activates shift grabbing on all AtoZ tabs</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">Open Date Tabs</div>
+      <div class="row-input">
+        <input id="dateInput" type="date" />
+        <button id="addDateBtn" class="btn">Add</button>
+      </div>
+      <div id="datesList" class="dates-list empty">No dates selected</div>
+      <div class="actions">
+        <button id="clearDatesBtn" class="btn ghost">Clear</button>
+        <button id="openDatesNowBtn" class="btn">Open Now</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">Keyboard Shortcuts</div>
+      <div class="actions">
+        <button id="pauseToggleBtn" class="btn half">Pause (P)</button>
+        <button id="overrideToggleBtn" class="btn half">Override (⇧O)</button>
+      </div>
+      <div class="actions" style="margin-top:8px;">
+        <button id="hideHudBtn" class="btn half">Toggle HUD (⇧H)</button>
+        <button id="reloadNowBtn" class="btn half">Reload Now (R)</button>
+      </div>
+      <div class="helper">Shortcuts work on all open AtoZ tabs.</div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">License</div>
+      <div class="row-input">
+        <input id="licenseInput" type="text" placeholder="Enter license key" />
+        <button id="saveKeyBtn" class="btn">Verify</button>
+      </div>
+      <div id="licenseStatus" class="status-text">Checking...</div>
+    </section>
+
+    <section class="card">
+      <div class="section-title">Need a key?</div>
+      <button id="contactBtn" class="btn full">Contact Us</button>
+    </section>
+
+    <footer>Shift Grabber V7 · All tabs sync</footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
