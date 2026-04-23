@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Shift Grabber</title>
@@ -8,66 +8,179 @@
 <body>
   <div class="wrap">
 
-    <div class="header">
-      <div class="brand">SG <span class="version">· V7</span></div>
-      <div id="statusBadge" class="badge off">OFF</div>
-    </div>
-
-    <section class="card">
-      <div class="row">
-        <label class="switch">
-          <input id="enableToggle" type="checkbox">
-          <span class="slider"></span>
-        </label>
-        <div class="label">
-          <div class="title">Enable Extension</div>
-          <div class="desc">Activates shift grabbing on all AtoZ tabs</div>
+    <!-- ── CONSENT MODAL ── -->
+    <div id="consentModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="consentTitle">
+      <div class="modal">
+        <h2 id="consentTitle" class="modal-title">Privacy Consent</h2>
+        <p class="modal-body">
+          Shift Grabber needs to verify your license and communicate with our servers.
+          We collect: device fingerprint (for security), license key, and usage timestamps.
+        </p>
+        <div class="modal-actions">
+          <button id="consentAcceptBtn" class="btn full" aria-label="Accept and continue using Shift Grabber">Accept & Continue</button>
+          <button id="consentDeclineBtn" class="btn ghost full" aria-label="Decline and disable extension">Decline</button>
         </div>
       </div>
-    </section>
+    </div>
 
-    <section class="card">
-      <div class="section-title">Open Date Tabs</div>
-      <div class="row-input">
-        <input id="dateInput" type="date" />
-        <button id="addDateBtn" class="btn">Add</button>
+    <!-- ── SIMPLE PANEL (default) ── -->
+    <div id="simplePanel" class="panel-simple" role="region" aria-label="Simple controls">
+      <div class="simple-header">
+        <div class="brand">SG <span class="version">· V9</span> <span id="tierBadge" class="tier-badge hidden"></span></div>
+        <div id="statusBadge" class="badge off" aria-live="polite" aria-atomic="true">OFF</div>
       </div>
-      <div id="datesList" class="dates-list empty">No dates selected</div>
-      <div class="actions">
-        <button id="clearDatesBtn" class="btn ghost">Clear</button>
-        <button id="openDatesNowBtn" class="btn">Open Now</button>
-      </div>
-    </section>
 
-    <section class="card">
-      <div class="section-title">Keyboard Shortcuts</div>
-      <div class="actions">
-        <button id="pauseToggleBtn" class="btn half">Pause (P)</button>
-        <button id="overrideToggleBtn" class="btn half">Override (⇧O)</button>
+      <div class="simple-key-section">
+        <label class="simple-label" for="licenseInput">License Key</label>
+        <input id="licenseInput" type="text" placeholder="Paste your license key" class="simple-key-input" aria-label="License key" aria-describedby="licenseStatus" tabindex="0" />
+        <div id="licenseStatus" class="status-text" aria-live="polite" aria-atomic="true" tabindex="-1">Enter key to activate</div>
       </div>
-      <div class="actions" style="margin-top:8px;">
-        <button id="hideHudBtn" class="btn half">Toggle HUD (⇧H)</button>
-        <button id="reloadNowBtn" class="btn half">Reload Now (R)</button>
+
+      <div class="simple-toggle-section">
+        <div class="simple-toggle-row">
+          <div class="simple-toggle-labels">
+            <div class="simple-toggle-title">Shift Grabber</div>
+            <div class="simple-toggle-desc" id="simpleToggleDesc">Enter key and turn on</div>
+          </div>
+          <label class="switch switch-big" aria-label="Enable Shift Grabber">
+            <input id="masterToggle" type="checkbox" role="switch" tabindex="0">
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
-      <div class="helper">Shortcuts work on all open AtoZ tabs.</div>
-    </section>
 
-    <section class="card">
-      <div class="section-title">License</div>
-      <div class="row-input">
-        <input id="licenseInput" type="text" placeholder="Enter license key" />
-        <button id="saveKeyBtn" class="btn">Verify</button>
+      <div class="simple-subscription">
+        <div id="subscriptionStatus" class="status-text" aria-live="polite" aria-atomic="true" tabindex="-1">Checking subscription...</div>
+        <div id="subscriptionDetail" class="helper"></div>
+        <div class="actions" style="margin-top:10px;">
+          <button id="manageBillingBtn" class="btn full hidden" aria-label="Manage billing" tabindex="0">Manage Billing</button>
+          <button id="upgradeBtn" class="btn full hidden" aria-label="Upgrade to Pro plan" tabindex="0">Upgrade to Pro</button>
+        </div>
       </div>
-      <div id="licenseStatus" class="status-text">Checking...</div>
-    </section>
 
-    <section class="card">
-      <div class="section-title">Need a key?</div>
-      <button id="contactBtn" class="btn full">Contact Us</button>
-    </section>
+      <div class="simple-footer-links">
+        <button id="advancedToggleLink" class="link-advanced" aria-label="Open advanced settings" tabindex="0">Advanced settings →</button>
+        <button id="contactBtn" class="link-help" aria-label="Get help" tabindex="0">Need help?</button>
+      </div>
+    </div>
 
-    <footer>Shift Grabber V7 · All tabs sync</footer>
+    <!-- ── ADVANCED PANEL (hidden) ── -->
+    <div id="advancedPanel" class="panel-advanced hidden" role="region" aria-label="Advanced controls">
+      <div class="header">
+        <div class="brand">SG <span class="version">· V9</span></div>
+        <div id="statusBadgeAdvanced" class="badge off" aria-live="polite" aria-atomic="true">OFF</div>
+      </div>
+
+      <section class="card" aria-labelledby="titleEnable">
+        <div class="row">
+          <label class="switch" aria-label="Enable extension">
+            <input id="enableToggle" type="checkbox" role="switch" tabindex="0">
+            <span class="slider"></span>
+          </label>
+          <div class="label">
+            <div class="title" id="titleEnable">Enable Extension</div>
+            <div class="desc">Activates shift grabbing on all AtoZ tabs</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="titleDates">
+        <div class="section-title" id="titleDates">Open Date Tabs</div>
+        <div class="row-input">
+          <input id="dateInput" type="date" aria-label="Select date to add" aria-describedby="datesHelp" tabindex="0" />
+          <button id="addDateBtn" class="btn" aria-label="Add selected date" tabindex="0">Add</button>
+        </div>
+        <div id="datesList" class="dates-list empty" aria-label="Selected dates">No dates selected</div>
+        <div class="actions">
+          <button id="clearDatesBtn" class="btn ghost" aria-label="Clear all dates" tabindex="0">Clear</button>
+          <button id="openDatesNowBtn" class="btn" aria-label="Open all selected dates" tabindex="0">Open Now</button>
+        </div>
+        <div id="datesHelp" class="helper">Selected dates open in new tabs when you start.</div>
+      </section>
+
+      <section class="card" aria-labelledby="titleBlacklist">
+        <div class="section-title" id="titleBlacklist">Blacklist Dates (Skip These)</div>
+        <div class="row-input">
+          <input id="blacklistDateInput" type="date" aria-label="Select blacklist date" aria-describedby="blacklistHelp" tabindex="0" />
+          <button id="addBlacklistDateBtn" class="btn" aria-label="Add blacklist date" tabindex="0">Add</button>
+        </div>
+        <div id="blacklistDatesList" class="dates-list empty" aria-label="Blacklisted dates">No blacklist (grab all)</div>
+        <div class="actions">
+          <button id="clearBlacklistDatesBtn" class="btn ghost" aria-label="Clear all blacklist dates" tabindex="0">Clear</button>
+          <button id="applyBlacklistDatesBtn" class="btn" aria-label="Apply blacklist" tabindex="0">Apply</button>
+        </div>
+        <div id="blacklistHelp" class="helper">Skip shifts on blacklist dates. Window auto-sets to 7 days from open tab's date.</div>
+      </section>
+
+      <section class="card" aria-labelledby="titleShortcuts">
+        <div class="section-title" id="titleShortcuts">Keyboard Shortcuts</div>
+        <div class="actions">
+          <button id="pauseToggleBtn" class="btn half" aria-label="Toggle pause" tabindex="0">Pause (P)</button>
+          <button id="overrideToggleBtn" class="btn half" aria-label="Toggle override speed" tabindex="0">Override (⇧O)</button>
+        </div>
+        <div class="actions" style="margin-top:8px;">
+          <button id="hideHudBtn" class="btn half" aria-label="Toggle HUD visibility" tabindex="0">Toggle HUD (⇧H)</button>
+          <button id="reloadNowBtn" class="btn half" aria-label="Reload all tabs now" tabindex="0">Reload Now (R)</button>
+        </div>
+        <div class="helper">Shortcuts work on all open AtoZ tabs.</div>
+      </section>
+
+      <section class="card" aria-labelledby="titleSubscription">
+        <div class="section-title" id="titleSubscription">Subscription</div>
+        <div id="subscriptionStatusAdvanced" class="status-text" aria-live="polite" aria-atomic="true" tabindex="-1">Checking subscription...</div>
+        <div id="subscriptionDetailAdvanced" class="helper" style="margin-top:4px;"></div>
+        <div class="actions" style="margin-top:10px;">
+          <button id="manageBillingBtnAdvanced" class="btn full hidden" aria-label="Manage billing" tabindex="0">Manage Billing</button>
+          <button id="upgradeBtnAdvanced" class="btn full hidden" aria-label="Upgrade to Pro plan" tabindex="0">Upgrade to Pro</button>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="titleNotifications">
+        <div class="section-title" id="titleNotifications">Notifications</div>
+        <div class="row">
+          <label class="switch" aria-label="Enable Telegram alerts">
+            <input id="tgOptOutToggle" type="checkbox" role="switch" tabindex="0">
+            <span class="slider"></span>
+          </label>
+          <div class="label">
+            <div class="title">Telegram Alerts</div>
+            <div class="desc">Send shift grab confirmations to Telegram</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="titleLicense">
+        <div class="section-title" id="titleLicense">License Key</div>
+        <div class="row-input">
+          <input id="licenseInputAdvanced" type="text" placeholder="Enter license key" aria-label="License key" aria-describedby="licenseStatusAdvanced" tabindex="0" />
+          <button id="saveKeyBtn" class="btn" aria-label="Verify license key" tabindex="0">Verify</button>
+        </div>
+        <div id="licenseStatusAdvanced" class="status-text" aria-live="polite" aria-atomic="true" tabindex="-1">Checking...</div>
+      </section>
+
+      <section class="card" aria-labelledby="titleData">
+        <div class="section-title" id="titleData">Data & Privacy</div>
+        <button id="exportDataBtn" class="btn full" aria-label="Export my data" tabindex="0">Export My Data (GDPR)</button>
+        <button id="deleteDataBtn" class="btn ghost full" style="margin-top:8px;" aria-label="Delete all my data" tabindex="0">Delete All My Data</button>
+        <div class="helper" style="margin-top:6px;">Download all data stored by this extension or permanently delete it.</div>
+      </section>
+
+      <section class="card" aria-labelledby="titleContact">
+        <div class="section-title" id="titleContact">Need a key?</div>
+        <button id="contactBtnAdvanced" class="btn full" aria-label="Contact support" tabindex="0">Contact Us</button>
+      </section>
+
+      <div class="advanced-back">
+        <button id="simpleToggleLink" class="link-advanced" aria-label="Back to simple view" tabindex="0">← Back to simple view</button>
+      </div>
+
+      <footer>Shift Grabber V9 · All tabs sync</footer>
+    </div>
+
   </div>
+  <script src="../src/shared/constants.js"></script>
+  <script src="../src/shared/crypto.js"></script>
+  <script src="../src/shared/fingerprint.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

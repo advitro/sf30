@@ -9,6 +9,20 @@
   --red:     #f87171;
   --blue:    #60a5fa;
   --orange:  #fbbf24;
+  /* Simple-mode aliases */
+  --text-primary:   var(--fg);
+  --text-secondary: var(--muted);
+  --text-disabled:  var(--subtle);
+  --border-default: var(--border);
+  --bg-deep:        var(--bg);
+  --radius-md:      8px;
+  --radius-lg:      12px;
+  --glass-border:   rgba(255,255,255,0.06);
+  --accent-500:     #6366f1;
+  --accent-400:     #818cf8;
+  --accent-300:     #a5b4fc;
+  --font-mono:      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans:      ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -266,4 +280,287 @@ footer {
   color: var(--subtle);
   letter-spacing: 1px;
   padding-top: 2px;
+}
+
+/* ── Simple Mode Panel ── */
+
+.panel-simple {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 16px;
+  gap: 20px;
+  min-height: 100%;
+}
+
+.panel-simple.hidden {
+  display: none !important;
+}
+
+.simple-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 280px;
+}
+
+.simple-header .brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+}
+
+.simple-header .brand .version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+/* ── License Key Section ── */
+
+.simple-key-section {
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.simple-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.simple-key-input {
+  width: 100%;
+  padding: 14px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-align: center;
+  letter-spacing: 1px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+}
+
+.simple-key-input::placeholder {
+  color: var(--text-disabled);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.simple-key-input:focus {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+/* ── Big Toggle Section ── */
+
+.simple-toggle-section {
+  width: 100%;
+  max-width: 280px;
+  background: var(--card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 18px 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.simple-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.simple-toggle-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.simple-toggle-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+.simple-toggle-desc {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Big switch variant */
+.switch-big {
+  width: 56px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.switch-big .slider {
+  border-radius: 32px;
+}
+
+.switch-big .slider::before {
+  width: 26px;
+  height: 26px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+}
+
+.switch-big input:checked + .slider::before {
+  transform: translateX(24px);
+}
+
+/* ── Simple Subscription Area ── */
+
+.simple-subscription {
+  width: 100%;
+  max-width: 280px;
+  text-align: center;
+}
+
+.simple-subscription .status-text {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.simple-subscription .helper {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Simple Footer Links ── */
+
+.simple-footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 280px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.link-advanced,
+.link-help {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 2px;
+  transition: color 0.2s ease;
+  font-family: var(--font-sans);
+}
+
+.link-advanced:hover,
+.link-help:hover {
+  color: var(--text-primary);
+}
+
+.link-advanced {
+  color: var(--accent-400);
+}
+
+.link-advanced:hover {
+  color: var(--accent-300);
+}
+
+/* ── Advanced Back Link ── */
+
+.advanced-back {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+/* ── Panel transition ── */
+.panel-advanced,
+.panel-simple {
+  transition: opacity 0.2s ease;
+}
+
+/* ── Ensure simple panel has no orphan elements ── */
+.panel-simple .status-text {
+  text-align: center;
+  margin-top: 2px;
+}
+
+/* ── Accessibility: focus styles ── */
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+[role="switch"]:focus-visible + .slider {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4);
+}
+
+/* ── Consent modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-overlay.hidden {
+  display: none !important;
+}
+
+.modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 320px;
+  width: 100%;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--fg);
+}
+
+.modal-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }

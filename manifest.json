@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Shift Grabber v7.16 — Extension (Licensed)",
-  "version": "1.0.2",
-  "description": "5-min burst reloads across all AtoZ tabs, longest-first Add Shift + auto confirm, stay-logged-in, pause/override, multi-date opener, realtime HUD. Protected by license.",
+  "name": "Shift Grabber V9 — Extension (Licensed)",
+  "version": "2.1.0",
+  "description": "Direct API shift grabber — polls 7-day window every 1s per tab, instant claim on detection. Burst reloads at 5-min marks, DOM backup, HUD, Telegram alerts. Protected by license.",
   "permissions": ["tabs", "storage", "scripting", "alarms"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://__SG_SERVER_DOMAIN__ https://api.telegram.org"
+  },
   "host_permissions": [
     "https://atoz.amazon.work/*",
-    "https://shift-grabber.vercel.app/*",
+    "https://atoz-apps.amazon.work/*",
+    "https://__SG_SERVER_DOMAIN__/*",
     "https://api.telegram.org/*"
   ],
   "background": {
@@ -23,15 +27,23 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["sounds/click.mp3.mp3"],
+      "resources": ["sounds/click.mp3"],
       "matches": ["https://atoz.amazon.work/*"]
     }
   ],
   "content_scripts": [
     {
       "matches": ["https://atoz.amazon.work/*"],
-      "js": ["src/content/main.js"],
-      "run_at": "document_end"
+      "js": ["src/shared/constants.js", "src/shared/crypto.js", "src/shared/fingerprint.js", "src/content/main.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://atoz.amazon.work/*"],
+      "js": ["src/shared/constants.js", "src/shared/fingerprint.js", "src/content/api-layer.js"],
+      "run_at": "document_end",
+      "world": "MAIN",
+      "all_frames": false
     }
   ]
 }
