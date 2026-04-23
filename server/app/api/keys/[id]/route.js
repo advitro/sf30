@@ -5,15 +5,13 @@ async function PATCH(request, { params }) {
   try {
     const { id } = params
     const body = await request.json()
-    const { status, subscriptionTier, expiresAt, subscriptionStatus, telegramBotToken, telegramChatId } = body
+    const { status, subscriptionTier, expiresAt, subscriptionStatus } = body
 
     const data = {}
     if (status !== undefined) data.status = status
     if (subscriptionTier !== undefined) data.subscriptionTier = subscriptionTier
     if (subscriptionStatus !== undefined) data.subscriptionStatus = subscriptionStatus
     if (expiresAt !== undefined) data.expiresAt = expiresAt ? new Date(expiresAt) : null
-    if (telegramBotToken !== undefined) data.telegramBotToken = telegramBotToken || null
-    if (telegramChatId !== undefined) data.telegramChatId = telegramChatId || null
 
     const updated = await prisma.apiKey.update({
       where: { id },

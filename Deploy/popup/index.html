@@ -115,15 +115,22 @@
       <!-- Settings -->
       <section id="panelSettings" class="tab-panel" role="tabpanel" aria-labelledby="tabSettings" hidden>
         <div class="card" aria-labelledby="titleTelegram">
-          <div class="section-title" id="titleTelegram">Notifications</div>
-          <div class="row">
+          <div class="section-title" id="titleTelegram">Telegram Notifications</div>
+          <div class="row-input">
+            <input id="tgBotTokenInput" type="text" placeholder="Bot token from @BotFather" aria-label="Telegram bot token" />
+          </div>
+          <div class="row-input">
+            <input id="tgChatIdInput" type="text" placeholder="Chat ID (e.g. -1001234567890)" aria-label="Telegram chat ID" />
+          </div>
+          <button id="tgSaveBtn" class="btn full" aria-label="Save Telegram configuration">Save Telegram Config</button>
+          <div class="row" style="margin-top:12px;">
             <div class="telegram-status" id="telegramStatus">Not configured</div>
             <label class="switch" aria-label="Enable Telegram alerts">
               <input id="tgOptOutToggle" type="checkbox" role="switch">
               <span class="slider"></span>
             </label>
           </div>
-          <div class="helper" id="telegramHelp">Get shift grab confirmations sent to your Telegram.</div>
+          <div class="helper" id="telegramHelp">Create a bot with @BotFather, paste the token and your chat ID above.</div>
         </div>
 
         <div class="card" aria-labelledby="titleData">

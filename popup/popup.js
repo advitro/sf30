@@ -88,6 +88,9 @@ const els = {
   reloadNowBtn:          document.getElementById("reloadNowBtn"),
 
   /* Settings tab */
+  tgBotTokenInput:       document.getElementById("tgBotTokenInput"),
+  tgChatIdInput:         document.getElementById("tgChatIdInput"),
+  tgSaveBtn:             document.getElementById("tgSaveBtn"),
   tgOptOutToggle:        document.getElementById("tgOptOutToggle"),
   telegramStatus:        document.getElementById("telegramStatus"),
   telegramHelp:          document.getElementById("telegramHelp"),
@@ -188,10 +191,7 @@ async function verifyWithServer(key) {
         sg_tier: result.subscription.tier || "basic"
       });
     }
-    // Store Telegram credentials if server provided them
-    if (result.telegramConfig && result.telegramConfig.botToken && result.telegramConfig.chatId) {
-      await storeTelegramConfig(result.telegramConfig.botToken, result.telegramConfig.chatId);
-    }
+
     if (!result.ok) {
       await setStore({ [KEYS.ACCESS_TOKEN]: null, [KEYS.TOKEN_EXP]: 0, sg_subscription_status: "expired" });
     }
@@ -211,8 +211,10 @@ async function storeTelegramConfig(botToken, chatId) {
       chatId
     });
     updateTelegramUI(true);
+    return true;
   } catch (e) {
     console.warn("[SG] Failed to store Telegram config:", e);
+    return false;
   }
 }
 
@@ -228,6 +230,17 @@ async function checkTelegramConfigured() {
   }
 }
 
+async function loadTelegramInputs() {
+  try {
+    const data = await getStore({ sg_tg_bot_token_enc: "", sg_tg_chat_id_enc: "" });
+    // We can't decrypt the stored values (only SW can), so inputs stay empty
+    // unless user re-enters them. This is intentional for security.
+    // The toggle and status still reflect whether credentials exist.
+  } catch (e) {
+    // ignore
+  }
+}
+
 function updateTelegramUI(configured) {
   if (configured) {
     els.telegramStatus.textContent = "Connected to Telegram";
@@ -239,7 +252,7 @@ function updateTelegramUI(configured) {
     els.telegramStatus.style.color = "var(--muted)";
     els.tgOptOutToggle.disabled = true;
     els.tgOptOutToggle.checked = false;
-    els.telegramHelp.textContent = "Contact support to enable Telegram alerts for your license.";
+    els.telegramHelp.textContent = "Create a bot with @BotFather, paste the token and your chat ID above.";
   }
 }
 
@@ -574,6 +587,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   refreshSubscriptionUI();
   updateStatusBadge();
   checkTelegramConfigured();
+  loadTelegramInputs();
 
   // Re-validate license on popup open if token expires within 5 min
   const nowSec = Math.floor(Date.now() / 1000);
@@ -583,6 +597,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       refreshSubscriptionUI();
       updateStatusBadge();
       checkTelegramConfigured();
+      loadTelegramInputs();
     });
   }
 
@@ -709,6 +724,26 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   els.reloadNowBtn.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "SG_RELOAD_ALL_NOW" });
+  });
+
+  /* ── Telegram save ── */
+  els.tgSaveBtn.addEventListener("click", async () => {
+    const botToken = (els.tgBotTokenInput.value || "").trim();
+    const chatId = (els.tgChatIdInput.value || "").trim();
+    if (!botToken || !chatId) {
+      els.telegramStatus.textContent = "Enter both bot token and chat ID";
+      els.telegramStatus.style.color = "var(--red)";
+      return;
+    }
+    const ok = await storeTelegramConfig(botToken, chatId);
+    if (ok) {
+      els.telegramStatus.textContent = "Saved — Connected to Telegram";
+      els.telegramStatus.style.color = "var(--green)";
+      els.tgOptOutToggle.disabled = false;
+    } else {
+      els.telegramStatus.textContent = "Failed to save — try again";
+      els.telegramStatus.style.color = "var(--red)";
+    }
   });
 
   /* ── Telegram opt-out ── */

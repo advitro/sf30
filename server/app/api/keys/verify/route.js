@@ -96,13 +96,6 @@ async function POST(request) {
       },
     }
 
-    if (record.telegramBotToken && record.telegramChatId) {
-      resp.telegramConfig = {
-        botToken: record.telegramBotToken,
-        chatId: record.telegramChatId,
-      }
-    }
-
     const res = NextResponse.json(resp)
     res.headers.set('X-Response-Hmac', signResponse(resp))
     return res
