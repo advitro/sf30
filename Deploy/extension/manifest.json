@@ -5,12 +5,12 @@
   "description": "Direct API shift grabber — polls 7-day window every 1s per tab, instant claim on detection. Burst reloads at 5-min marks, DOM backup, HUD, Telegram alerts. Protected by license.",
   "permissions": ["tabs", "storage", "scripting", "alarms"],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://__SG_SERVER_DOMAIN__ https://api.telegram.org"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://api.telegram.org"
   },
   "host_permissions": [
     "https://atoz.amazon.work/*",
     "https://atoz-apps.amazon.work/*",
-    "https://__SG_SERVER_DOMAIN__/*",
+
     "https://api.telegram.org/*"
   ],
   "background": {
@@ -34,13 +34,13 @@
   "content_scripts": [
     {
       "matches": ["https://atoz.amazon.work/*"],
-      "js": ["src/shared/constants.js", "src/shared/crypto.js", "src/shared/fingerprint.js", "src/content/main.js"],
+      "js": ["src/shared/constants.js", "src/shared/crypto.js", "src/shared/fingerprint.js", "src/shared/license-validator.js", "src/content/main.js"],
       "run_at": "document_end",
       "all_frames": false
     },
     {
       "matches": ["https://atoz.amazon.work/*"],
-      "js": ["src/shared/constants.js", "src/shared/fingerprint.js", "src/content/api-layer.js"],
+      "js": ["src/shared/constants.js", "src/shared/fingerprint.js", "src/shared/license-validator.js", "src/content/api-layer.js"],
       "run_at": "document_end",
       "world": "MAIN",
       "all_frames": false

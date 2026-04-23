@@ -1,9 +1,10 @@
-// service-worker.js — background scheduler that requires server-issued token
-// It uses chrome.alarms for timing and only runs when a valid token exists.
+// service-worker.js — background scheduler for offline license model
+// Uses chrome.alarms for timing and only runs when a valid local license exists.
 importScripts("../src/shared/constants.js");
 importScripts("../src/shared/crypto.js");
 importScripts("../src/shared/fingerprint.js");
 importScripts("../src/shared/circuit-breaker.js");
+importScripts("../src/shared/license-validator.js");
 
 const C = self.SG_CONSTS;
 const K = C.KEYS;
@@ -13,11 +14,10 @@ const MSG = C.MSG;
 const ALARMS = C.ALARMS;
 const SG_CRYPTO = self.SG_CRYPTO;
 const SG_FINGERPRINT = self.SG_FINGERPRINT;
+const SG_LICENSE = self.SG_LICENSE;
 
 // HMAC verification key — injected at build time via string literal replacement
 // Server must sign responses with the same key. Rotate monthly.
-var _hk = ["__SG", "_HMAC", "_KEY", "_PLACEHOLDER__"].join("");
-
 // Circuit breaker — extracted to shared module for testability
 var _cb = SG_CIRCUIT_BREAKER.createCircuitBreaker(3, 300000, function () {
   persistCircuitBreaker();
@@ -48,28 +48,22 @@ let _memTokenExp = 0;
 /** Load decrypted token from storage, with in-memory caching. */
 async function getValidToken() {
   const nowSec = Math.floor(Date.now() / 1000);
-  if (_memToken && _memTokenExp > nowSec) {
-    return { token: _memToken, exp: _memTokenExp };
+  const st = await getState();
+  const exp = st.sg_license_exp || 0;
+  if (exp > nowSec + 60) {
+    return { token: "offline", exp: exp };
   }
-  const loaded = await loadEncryptedToken();
-  if (loaded.token && loaded.exp > nowSec) {
-    _memToken = loaded.token;
-    _memTokenExp = loaded.exp;
-    return loaded;
-  }
-  _memToken = null;
-  _memTokenExp = 0;
   return null;
 }
 
 function invalidateTokenCache() {
-  _memToken = null;
-  _memTokenExp = 0;
+  // No-op in offline mode
 }
 
 /**
- * Pings the license server every 10 min to update last-seen and check for kill/revoke.
- * @returns {Promise<{ok:boolean, killed?:boolean, reason?:string}>}
+ * Offline license check — verifies local expiry and device binding.
+ * Replaces server heartbeat in the no-server model.
+ * @returns {Promise<{ok:boolean}>}
  */
 async function sendHeartbeat() {
   try {
@@ -77,59 +71,28 @@ async function sendHeartbeat() {
     const key = st[K.USER_KEY];
     if (!key) return { ok: false, reason: "no-key" };
 
-    const deviceId = st[K.DEVICE_ID] || "";
     const fp = await SG_FINGERPRINT.getFingerprint();
+    const result = await SG_LICENSE.validate(key, fp);
 
-    const resp = await fetch(`${URLS.SERVER}/heartbeat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, deviceId, fingerprint: fp }),
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) return { ok: false, reason: "server-error" };
-
-    const bodyText = await resp.text();
-    const hmacHeader = resp.headers.get("X-Response-Hmac") || "";
-    const hmacOk = await validateResponseHmac(bodyText, hmacHeader);
-    if (!hmacOk) {
-      console.error("[SG SW] Heartbeat HMAC invalid — possible MITM");
-      return { ok: false, reason: "invalid-signature" };
-    }
-
-    const json = JSON.parse(bodyText);
-
-    // Server can force-disable the extension (revocation, device limit, etc.)
-    if (json.kill) {
-      killSwitchActive = true;
-      invalidateTokenCache();
-      await setState({ [K.ENABLED]: false, sg_kill_reason: json.reason || "killed-by-server" });
-      await withAlarmLock(async () => {
-        await clearAllAlarms();
-        await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
-      });
-      chrome.runtime.sendMessage({ type: "SG_KILL", reason: json.reason || "killed-by-server" });
-      console.warn("[SG SW] Kill switch activated:", json.reason);
-      return { ok: false, killed: true, reason: json.reason };
-    }
-
-    // Apply server-pushed config if present (allowlist only)
-    if (json.config && typeof json.config === "object") {
-      const ALLOWED_CONFIG_KEYS = ["sg_base_ms", "sg_jitter_ms", "sg_burst_count", "sg_turbo"];
-      const filtered = {};
-      for (const key of ALLOWED_CONFIG_KEYS) {
-        if (key in json.config) filtered[key] = json.config[key];
+    if (!result.ok) {
+      if (result.reason === "expired") {
+        killSwitchActive = true;
+        await setState({ [K.ENABLED]: false, sg_kill_reason: "license-expired" });
+        await withAlarmLock(async () => {
+          await clearAllAlarms();
+          await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
+        });
+        chrome.runtime.sendMessage({ type: "SG_KILL", reason: "license-expired" });
+        console.warn("[SG SW] License expired — extension disabled");
       }
-      if (Object.keys(filtered).length > 0) {
-        await setState(filtered);
-        console.log("[SG SW] Applied server config:", Object.keys(filtered).join(", "));
-      }
+      return { ok: false, reason: result.reason };
     }
 
     killSwitchActive = false;
     return { ok: true };
   } catch (e) {
-    console.error("[SG SW] Heartbeat error:", e);
-    return { ok: false, reason: "network" };
+    console.error("[SG SW] License check error:", e);
+    return { ok: false, reason: "validation-error" };
   }
 }
 
@@ -682,100 +645,11 @@ function recordCircuitBreaker(success) {
 
 // Fetch remote config (stealth params, enabled features) from server
 async function fetchServerConfig() {
-  try {
-    const resp = await fetch(`${URLS.SERVER}/config?version=${chrome.runtime.getManifest().version}`, { method: "GET", signal: AbortSignal.timeout(10000) });
-    if (!resp.ok) return null;
-    const bodyText = await resp.text();
-    const hmacHeader = resp.headers.get("X-Response-Hmac") || "";
-    const hmacOk = await validateResponseHmac(bodyText, hmacHeader);
-    if (!hmacOk) {
-      console.error("[SG SW] Config HMAC invalid — possible MITM");
-      return null;
-    }
-    const json = JSON.parse(bodyText);
-    await setState({ sg_server_config: json, sg_config_ts: Date.now() });
-    return json;
-  } catch (e) {
-    return null;
-  }
+  // No-op in offline mode — no server to fetch config from
+  return null;
 }
 
-// SW-side token refresh — verifies directly against the server without needing the popup open.
-// This is the primary refresh path. Popup fallback is secondary.
-// Includes circuit breaker: after 3 consecutive failures, use cached token for 5 min.
-// Encrypt and store token using device fingerprint as key
-/**
- * Stores the access token encrypted with AES-GCM.
- * No plaintext cache — fail-closed.
- * @param {string} token
- * @param {number} exp Unix timestamp
- * @returns {Promise<void>}
- */
-async function storeEncryptedToken(token, exp) {
-  try {
-    var fp = await SG_FINGERPRINT.getFingerprint();
-    var encrypted = await SG_CRYPTO.encrypt(token, fp);
-    await setState({
-      sg_enc_token: encrypted,
-      sg_token_exp: exp,
-      [K.ACCESS_TOKEN]: null,       // no plaintext cache — always decrypt
-      [K.TOKEN_EXP]: exp
-    });
-    _memToken = token;
-    _memTokenExp = exp;
-  } catch (e) {
-    console.error("[SG SW] Token encryption failed:", e);
-    // Fail closed — do not store plaintext
-    invalidateTokenCache();
-    await setState({ [K.ACCESS_TOKEN]: null, [K.TOKEN_EXP]: 0 });
-  }
-}
-
-// Decrypt token from storage
-/**
- * Loads and decrypts the stored access token.
- * @returns {Promise<{token:string|null, exp:number}>}
- */
-async function loadEncryptedToken() {
-  try {
-    var st = await getState();
-    if (st.sg_enc_token) {
-      var fp = await SG_FINGERPRINT.getFingerprint();
-      var token = await SG_CRYPTO.decrypt(st.sg_enc_token, fp);
-      return { token: token, exp: st.sg_token_exp || 0 };
-    }
-    return { token: null, exp: 0 };
-  } catch (e) {
-    console.error("[SG SW] Token decryption failed:", e);
-    return { token: null, exp: 0 };
-  }
-}
-
-// Validate HMAC signature from server response
-/**
- * Validates server response HMAC against _hk.
- * @param {Object} json
- * @returns {Promise<boolean>}
- */
-async function validateResponseSignature(json) {
-  try {
-    if (!json.signature || !json.accessToken || !json.expiresAt) return false;
-    var message = (json.accessToken || "") + "|" + (json.expiresAt || "") + "|" + (json.subscription?.tier || "basic");
-    return await SG_CRYPTO.verifyHmac(message, json.signature, _hk);
-  } catch (e) {
-    return false;
-  }
-}
-
-/** Generic HMAC validation for any response body against a header. */
-async function validateResponseHmac(bodyText, hmacHeader) {
-  try {
-    if (!hmacHeader || !_hk) return false;
-    return await SG_CRYPTO.verifyHmac(bodyText, hmacHeader, _hk);
-  } catch (e) {
-    return false;
-  }
-}
+// Offline license model — no server tokens to encrypt/decrypt
 
 /**
  * Verifies a license key with the server. Fail-closed: no self-issue fallback.
@@ -787,78 +661,33 @@ async function verifyLicense(key, deviceId) {
   try {
     if (!key || !deviceId) return { ok: false, reason: "no-key" };
 
-    // Circuit breaker: if open, check if we have a cached token within grace period
-    if (circuitBreakerOpen()) {
-      var cached = await loadEncryptedToken();
-      var nowSec = Math.floor(Date.now() / 1000);
-      if (cached.token && cached.exp > nowSec + 60) {
-        console.log("[SG SW] Circuit breaker open — using cached token");
-        return { ok: true, token: cached.token, exp: cached.exp, degraded: true };
-      }
-      return { ok: false, reason: "server-unreachable" };
-    }
-
     var fp = await SG_FINGERPRINT.getFingerprint();
-    var resp = await fetch(`${URLS.SERVER}/verify`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ key, deviceId, fingerprint: fp }),
-      signal:  AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) {
-      var data = await resp.json().catch(() => ({}));
-      recordCircuitBreaker(false);
-      return { ok: false, reason: data?.reason || `http ${resp.status}` };
-    }
-    var json = await resp.json();
-    if (!json.authorized) {
-      recordCircuitBreaker(false);
-      // Store device limit info for popup display
-      if (json.reason === C.REASONS.DEVICE_LIMIT_EXCEEDED) {
+    var result = await SG_LICENSE.validate(key, fp);
+
+    if (!result.ok) {
+      if (result.reason === "device-limit-exceeded") {
         await setState({
-          sg_device_limit_reason: json.reason,
-          sg_device_cooldown_days: json.deviceCooldownDays || 30
+          sg_device_limit_reason: result.reason,
+          sg_device_cooldown_days: 0
         });
       }
-      return { ok: false, reason: json.reason || "not authorized", deviceCooldownDays: json.deviceCooldownDays };
+      return result;
     }
 
-    // Validate HMAC signature
-    var sigOk = await validateResponseSignature(json);
-    if (!sigOk) {
-      console.error("[SG SW] Response signature invalid — possible MITM or tampering");
-      return { ok: false, reason: "invalid-signature" };
-    }
-
-    recordCircuitBreaker(true);
-    if (!json.accessToken || !json.expiresAt) {
-      return { ok: false, reason: "incomplete-server-response" };
-    }
-    var token = json.accessToken;
-    var exp   = json.expiresAt;
-    var subscription = json.subscription || { status: "active", tier: "basic" };
-
-    // Store encrypted token only — plaintext cache removed for security
-    await storeEncryptedToken(token, exp);
+    // Store license info locally
     await setState({
       [K.USER_KEY]: key,
-      sg_subscription_status: subscription.status,
-      sg_tier: subscription.tier
+      sg_tier: result.tier,
+      sg_license_exp: result.exp,
+      sg_device_limit_reason: null,
+      sg_device_cooldown_days: 0
     });
 
-    console.log("[SG SW] License verified, token valid for", exp - Math.floor(Date.now() / 1000), "s", "· tier:", subscription.tier);
-
-    // Clear any previous device limit state on successful verify
-    await setState({ sg_device_limit_reason: null, sg_device_cooldown_days: 0 });
-
-    // Pull latest server config on successful verify
-    fetchServerConfig();
-
-    return { ok: true, token, exp, subscription };
+    console.log("[SG SW] License verified · tier:", result.tier, "· expires:", new Date(result.exp * 1000).toISOString());
+    return { ok: true, tier: result.tier, exp: result.exp };
   } catch (e) {
     console.error("[SG SW] License verification error:", e);
-    recordCircuitBreaker(false);
-    return { ok: false, reason: "network" };
+    return { ok: false, reason: "validation-error" };
   }
 }
 
@@ -894,13 +723,13 @@ async function refreshTokenInBackground() {
  * @returns {Promise<void>}
  */
 async function tryAutoRefreshTokenIfNeeded() {
-  const cached = await loadEncryptedToken();
+  const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  const exp    = cached.exp || 0;
-  if (!cached.token || exp - nowSec > 120) return; // not expiring soon
+  const exp = st.sg_license_exp || 0;
+  const key = st[K.USER_KEY] || "";
+  if (!key || exp - nowSec > 300) return; // not expiring soon
   const ok = await refreshTokenInBackground();
   if (!ok) {
-    // Popup fallback — only works if popup is currently open
     chrome.runtime.sendMessage({ type: "SG_REQUEST_TOKEN_REFRESH" }, () => {});
   }
 }

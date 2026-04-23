@@ -67,10 +67,12 @@
     // ── URLs ──
     URLS: {
       GQL:          "https://atoz-apps.amazon.work/apis/ScheduleManagementService/graphql",
-      SERVER:       "__SG_SERVER_URL__",
       CONTACT_URL:  "__SG_CONTACT_URL__",
       TELEGRAM_API: "https://api.telegram.org"
     },
+
+    // ── License (embedded at build time) ──
+    LICENSE_PUBLIC_KEY: "__SG_LICENSE_PUBLIC_KEY__",
 
     // ── GraphQL ──
     GQL: {

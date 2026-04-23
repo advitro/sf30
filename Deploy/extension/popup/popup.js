@@ -169,7 +169,7 @@ function canVerify() {
   return true;
 }
 
-async function verifyWithServer(key) {
+async function verifyLicense(key) {
   try {
     const result = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "SG_VERIFY_LICENSE", key }, (res) => {
@@ -183,13 +183,12 @@ async function verifyWithServer(key) {
     if (result.tier) {
       await setStore({ sg_tier: result.tier });
     }
-
-    if (!result.ok) {
-      await setStore({ [KEYS.ACCESS_TOKEN]: null, [KEYS.TOKEN_EXP]: 0 });
+    if (result.exp) {
+      await setStore({ sg_license_exp: result.exp });
     }
     return result;
   } catch (e) {
-    return { ok: false, reason: "network" };
+    return { ok: false, reason: "validation-error" };
   }
 }
 
@@ -424,7 +423,7 @@ async function handleMasterToggle(checked) {
     updateToggleDesc(false, true, false);
 
     await setStore({ [KEYS.USER_KEY]: key });
-    const r = await verifyWithServer(key);
+    const r = await verifyLicense(key);
 
     setLoading(els.licenseStatus, false);
     els.masterToggle.disabled = false;
@@ -474,7 +473,7 @@ async function handleVerify() {
   setStatus(els.licenseStatus, "Verifying…", "info");
   setLoading(els.licenseStatus, true);
 
-  const r = await verifyWithServer(key);
+  const r = await verifyLicense(key);
 
   setLoading(els.licenseStatus, false);
   if (r.ok) {
@@ -520,7 +519,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   chrome.storage.local.get([KEYS.USER_KEY], async (st) => {
     const key = st[KEYS.USER_KEY];
     if (!key) return;
-    await verifyWithServer(key);
+    await verifyLicense(key);
     refreshLicenseStatusUI();
   });
 });
@@ -565,7 +564,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Re-validate license on popup open if token expires within 5 min
   const nowSec = Math.floor(Date.now() / 1000);
   if (key && (!st[KEYS.TOKEN_EXP] || st[KEYS.TOKEN_EXP] - nowSec < 300)) {
-    verifyWithServer(key).then(() => {
+    verifyLicense(key).then(() => {
       refreshLicenseStatusUI();
       refreshLicenseStatusRow();
       updateStatusBadge();

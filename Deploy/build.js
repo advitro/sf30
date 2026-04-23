@@ -28,7 +28,8 @@ const OBFUSCATE_PATTERNS = [
   "src/shared/constants.js",
   "src/shared/crypto.js",
   "src/shared/fingerprint.js",
-  "src/shared/circuit-breaker.js"
+  "src/shared/circuit-breaker.js",
+  "src/shared/license-validator.js"
 ];
 
 // Files to copy as-is
@@ -146,11 +147,21 @@ if (!ENV_CONFIG) {
   process.exit(1);
 }
 
-// HMAC key must be provided — fail closed
+// HMAC key for Telegram credential encryption — must be provided
 const hmacKey = process.env.SG_HMAC_KEY;
 if (!hmacKey || hmacKey === "change-me-in-production") {
   console.error("❌ SG_HMAC_KEY environment variable is required. Aborting build.");
   process.exit(1);
+}
+
+// Load RSA public key for license validation
+const PUBLIC_KEY_PATH = path.join(__dirname, "keys", "public.jwk.json");
+let licensePublicKey = null;
+if (fs.existsSync(PUBLIC_KEY_PATH)) {
+  licensePublicKey = JSON.parse(fs.readFileSync(PUBLIC_KEY_PATH, "utf-8"));
+} else {
+  console.warn("⚠️  keys/public.jwk.json not found. Run 'node scripts/generate-rsa-keys.js' first.");
+  console.warn("   License validation will not work without a public key.");
 }
 
 // Randomize inter-script message secret BEFORE obfuscation so it survives stringArray encoding
@@ -164,12 +175,16 @@ function preprocessSource(srcPath) {
   // Replace message secret placeholder
   code = code.split('"__SG_MSG_SECRET__"').join('"' + msgSecret + '"');
 
-  // Replace server URL placeholder in ALL files
-  code = code.split("__SG_SERVER_URL__").join(ENV_CONFIG.SERVER_URL);
-
   // Replace contact URL placeholder in ALL files
   const contactUrl = ENV_CONFIG.CONTACT_URL || "https://t.me/shift_grabber";
   code = code.split("__SG_CONTACT_URL__").join(contactUrl);
+
+  // Replace license public key placeholder in constants.js
+  if (srcPath.includes("constants")) {
+    if (licensePublicKey) {
+      code = code.split('"__SG_LICENSE_PUBLIC_KEY__"').join(JSON.stringify(licensePublicKey));
+    }
+  }
 
   // Service worker: replace split-string HMAC placeholder with real key before obfuscation
   if (srcPath.includes("service-worker")) {
@@ -185,8 +200,7 @@ if (fs.existsSync(DIST_DIR)) {
 }
 fs.mkdirSync(DIST_DIR, { recursive: true });
 
-console.log("🏗️  Building Shift Grabber V9 — Production\n");
-console.log("🌍 Build environment:", ENV, "→", ENV_CONFIG.SERVER_URL);
+console.log("🏗️  Building Shift Grabber V9 — Production (Offline License)\n");
 
 // Obfuscate JS files
 // Service worker is processed with stringArray disabled so build-time string injection works reliably
@@ -212,16 +226,13 @@ for (const pattern of COPY_PATTERNS) {
   copyGlob(pattern, SRC_DIR);
 }
 
-// Update manifest.json with environment-specific server domain
+// Update manifest.json with contact URL
 const manifestPath = path.join(DIST_DIR, "manifest.json");
 if (fs.existsSync(manifestPath)) {
   let manifest = fs.readFileSync(manifestPath, "utf-8");
-  const serverDomain = new URL(ENV_CONFIG.SERVER_URL).hostname;
-  manifest = manifest.split("__SG_SERVER_DOMAIN__").join(serverDomain);
-  manifest = manifest.split("__SG_SERVER_URL__").join(ENV_CONFIG.SERVER_URL);
   manifest = manifest.split("__SG_CONTACT_URL__").join(ENV_CONFIG.CONTACT_URL || "https://t.me/shift_grabber");
   fs.writeFileSync(manifestPath, manifest, "utf-8");
-  console.log("📝 Updated manifest.json with server domain:", serverDomain);
+  console.log("📝 Updated manifest.json");
 }
 
 // Post-obfuscation safety check: ensure no HMAC placeholder remains in service worker
@@ -236,7 +247,7 @@ if (fs.existsSync(swPath)) {
 }
 
 // Build-time global name randomization — prevents attackers from calling exposed APIs
-const GLOBAL_NAMES = ["SG_CONSTS", "SG_CRYPTO", "SG_FINGERPRINT", "SG_CIRCUIT_BREAKER"];
+const GLOBAL_NAMES = ["SG_CONSTS", "SG_CRYPTO", "SG_FINGERPRINT", "SG_CIRCUIT_BREAKER", "SG_LICENSE"];
 const globalNameMap = {};
 const randName = () => "_" + crypto.randomBytes(6).toString("hex");
 GLOBAL_NAMES.forEach((name) => { globalNameMap[name] = randName(); });
