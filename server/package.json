@@ -15,7 +15,6 @@
     "react-dom": "^18.3.1",
     "@prisma/client": "^5.16.0",
     "prisma": "^5.16.0",
-    "stripe": "^16.2.0",
     "jsonwebtoken": "^9.0.2",
     "jose": "^5.6.3",
     "bcryptjs": "^2.4.3",

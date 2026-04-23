@@ -15,9 +15,6 @@ model ApiKey {
   status               String   @default("active")
   subscriptionTier     String   @default("basic")
   subscriptionStatus   String   @default("active")
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  paymentStatus        String   @default("pending")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   expiresAt            DateTime?

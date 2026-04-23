@@ -209,12 +209,8 @@ export default function KeyDetailPage() {
                 <StatusBadge status={keyData.paymentStatus} />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Stripe Customer</span>
-                <span className="font-mono text-xs text-slate-300">{keyData.stripeCustomerId || '—'}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Stripe Subscription</span>
-                <span className="font-mono text-xs text-slate-300">{keyData.stripeSubscriptionId || '—'}</span>
+                <span className="text-sm text-slate-400">Payment Status</span>
+                <StatusBadge status={keyData.status} />
               </div>
             </div>
           </div>

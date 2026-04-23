@@ -2,7 +2,6 @@ const { NextResponse } = require('next/server')
 const { prisma } = require('../../../../lib/prisma')
 const { signResponse } = require('../../../../lib/hmac')
 const { SignJWT } = require('jose')
-const crypto = require('crypto')
 
 const SG_HMAC_KEY = new TextEncoder().encode(process.env.SG_HMAC_KEY || 'change-me-in-production-min-32-chars')
 
@@ -29,13 +28,6 @@ async function POST(request) {
 
     if (record.status !== 'active') {
       const resp = { authorized: false, error: 'revoked' }
-      const res = NextResponse.json(resp, { status: 403 })
-      res.headers.set('X-Response-Hmac', signResponse(resp))
-      return res
-    }
-
-    if (record.subscriptionStatus === 'cancelled' || record.subscriptionStatus === 'expired') {
-      const resp = { authorized: false, error: 'subscription-inactive' }
       const res = NextResponse.json(resp, { status: 403 })
       res.headers.set('X-Response-Hmac', signResponse(resp))
       return res
@@ -90,10 +82,7 @@ async function POST(request) {
       authorized: true,
       accessToken,
       expiresAt: expiresAt.toISOString(),
-      subscription: {
-        status: record.subscriptionStatus,
-        tier: record.subscriptionTier,
-      },
+      tier: record.subscriptionTier || 'basic',
     }
 
     const res = NextResponse.json(resp)

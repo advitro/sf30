@@ -2,8 +2,6 @@
 // Single license input, single toggle, tabbed sections.
 
 const CONTACT_URL = (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.URLS.CONTACT_URL : "__SG_CONTACT_URL__");
-const SERVER = (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.URLS.SERVER : "__SG_SERVER_URL__");
-const BILLING_PORTAL_URL = `${SERVER}/billing-portal`;
 
 const KEYS = {
   ENABLED:         "sg_enabled",
@@ -55,11 +53,8 @@ const els = {
   licenseStatus:         document.getElementById("licenseStatus"),
   masterToggle:          document.getElementById("masterToggle"),
   toggleDesc:            document.getElementById("toggleDesc"),
-  subscriptionStatus:    document.getElementById("subscriptionStatus"),
-  subscriptionDetail:    document.getElementById("subscriptionDetail"),
-  manageBillingBtn:      document.getElementById("manageBillingBtn"),
-  upgradeBtn:            document.getElementById("upgradeBtn"),
-  subscriptionActions:   document.getElementById("subscriptionActions"),
+  licenseStatusRow:      document.getElementById("licenseStatusRow"),
+  tierDetail:            document.getElementById("tierDetail"),
 
   /* Tabs */
   tabShifts:             document.getElementById("tabShifts"),
@@ -185,15 +180,12 @@ async function verifyWithServer(key) {
         }
       });
     });
-    if (result.subscription) {
-      await setStore({
-        sg_subscription_status: result.subscription.status || "unknown",
-        sg_tier: result.subscription.tier || "basic"
-      });
+    if (result.tier) {
+      await setStore({ sg_tier: result.tier });
     }
 
     if (!result.ok) {
-      await setStore({ [KEYS.ACCESS_TOKEN]: null, [KEYS.TOKEN_EXP]: 0, sg_subscription_status: "expired" });
+      await setStore({ [KEYS.ACCESS_TOKEN]: null, [KEYS.TOKEN_EXP]: 0 });
     }
     return result;
   } catch (e) {
@@ -256,12 +248,11 @@ function updateTelegramUI(configured) {
   }
 }
 
-/* ── Subscription UI ── */
+/* ── License Status UI ── */
 
-async function refreshSubscriptionUI() {
-  const st = await getStore([KEYS.USER_KEY, KEYS.ACCESS_TOKEN, KEYS.TOKEN_EXP, "sg_subscription_status", "sg_tier", "sg_device_limit_reason", "sg_device_cooldown_days"]);
+async function refreshLicenseStatusRow() {
+  const st = await getStore([KEYS.USER_KEY, KEYS.ACCESS_TOKEN, KEYS.TOKEN_EXP, "sg_tier", "sg_device_limit_reason", "sg_device_cooldown_days"]);
   const key = st[KEYS.USER_KEY];
-  const status = st.sg_subscription_status || "unknown";
   const tier = st.sg_tier || "basic";
   const exp = st[KEYS.TOKEN_EXP] || 0;
   const now = Math.floor(Date.now() / 1000);
@@ -271,46 +262,28 @@ async function refreshSubscriptionUI() {
   setTierBadge(tier);
 
   if (!key) {
-    setStatus(els.subscriptionStatus, "Enter a license key to activate.", "error");
-    els.subscriptionDetail.textContent = "";
-    hide(els.manageBillingBtn);
-    hide(els.upgradeBtn);
+    setStatus(els.licenseStatusRow, "Enter a license key to activate.", "error");
+    els.tierDetail.textContent = "";
     updateToggleDesc(false, false, false);
     return;
   }
 
   if (deviceLimitReason === "device-limit-exceeded") {
-    setStatus(els.subscriptionStatus, "Device Limit Exceeded", "error");
-    els.subscriptionDetail.textContent = `This key is active on another device. Transfer available in ${deviceCooldownDays} day${deviceCooldownDays === 1 ? "" : "s"}.`;
-    hide(els.manageBillingBtn);
-    hide(els.upgradeBtn);
+    setStatus(els.licenseStatusRow, "Device Limit Exceeded", "error");
+    els.tierDetail.textContent = `This key is active on another device. Transfer available in ${deviceCooldownDays} day${deviceCooldownDays === 1 ? "" : "s"}.`;
     updateToggleDesc(false, true, false);
     return;
   }
 
-  const isValid = status === "active" || (exp && exp > now);
+  const isValid = exp && exp > now;
 
   if (isValid) {
     const days = exp ? Math.ceil((exp - now) / 86400) : "?";
-    setStatus(els.subscriptionStatus, "Subscription Active", "success");
-    els.subscriptionDetail.textContent = `Renews in ${days} day${days === 1 ? "" : "s"} · ${tier === "pro" ? "Pro Plan" : "Basic Plan"}`;
-    show(els.manageBillingBtn);
-    tier === "pro" ? hide(els.upgradeBtn) : show(els.upgradeBtn);
-  } else if (status === "past_due") {
-    setStatus(els.subscriptionStatus, "Payment Failed", "warning");
-    els.subscriptionDetail.textContent = "Update your payment method to continue.";
-    show(els.manageBillingBtn);
-    hide(els.upgradeBtn);
-  } else if (status === "cancelled" || status === "expired") {
-    setStatus(els.subscriptionStatus, "Subscription Expired", "error");
-    els.subscriptionDetail.textContent = "Renew to continue using Shift Grabber.";
-    hide(els.manageBillingBtn);
-    show(els.upgradeBtn);
+    setStatus(els.licenseStatusRow, "License Active", "success");
+    els.tierDetail.textContent = `${tier === "pro" ? "Pro Plan" : "Basic Plan"} · Expires in ${days} day${days === 1 ? "" : "s"}`;
   } else {
-    setStatus(els.subscriptionStatus, "Checking subscription…", "info");
-    els.subscriptionDetail.textContent = "";
-    hide(els.manageBillingBtn);
-    hide(els.upgradeBtn);
+    setStatus(els.licenseStatusRow, "License expired or invalid — re-verify.", "error");
+    els.tierDetail.textContent = "";
   }
 
   const enabledSt = await getStore([KEYS.ENABLED]);
@@ -459,7 +432,7 @@ async function handleMasterToggle(checked) {
     if (!r.ok) {
       setStatus(els.licenseStatus, (r.reason || "error").replace(/-/g, " "), "error");
       els.masterToggle.checked = false;
-      refreshSubscriptionUI();
+      refreshLicenseStatusRow();
       return;
     }
 
@@ -472,7 +445,7 @@ async function handleMasterToggle(checked) {
       chrome.runtime.sendMessage({ type: "SG_POKE_SCHEDULE" });
     });
     updateStatusBadge();
-    refreshSubscriptionUI();
+    refreshLicenseStatusRow();
 
   } else {
     // Turning OFF
@@ -480,7 +453,7 @@ async function handleMasterToggle(checked) {
     els.masterToggle.checked = false;
     chrome.runtime.sendMessage({ type: "SG_SET_ENABLED", value: false });
     updateStatusBadge();
-    refreshSubscriptionUI();
+    refreshLicenseStatusRow();
   }
 }
 
@@ -511,7 +484,7 @@ async function handleVerify() {
   } else {
     setStatus(els.licenseStatus, (r.reason || "error").replace(/-/g, " "), "error");
   }
-  refreshSubscriptionUI();
+  refreshLicenseStatusRow();
 }
 
 /* ── GDPR Export ── */
@@ -584,7 +557,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderDates(st[KEYS.DATES] || []);
   renderBlacklistDates(st[KEYS.BLACKLIST_DATES] || []);
   refreshLicenseStatusUI();
-  refreshSubscriptionUI();
+  refreshLicenseStatusRow();
   updateStatusBadge();
   checkTelegramConfigured();
   loadTelegramInputs();
@@ -594,7 +567,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (key && (!st[KEYS.TOKEN_EXP] || st[KEYS.TOKEN_EXP] - nowSec < 300)) {
     verifyWithServer(key).then(() => {
       refreshLicenseStatusUI();
-      refreshSubscriptionUI();
+      refreshLicenseStatusRow();
       updateStatusBadge();
       checkTelegramConfigured();
       loadTelegramInputs();
@@ -635,12 +608,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   /* ── Billing buttons ── */
-  els.manageBillingBtn.addEventListener("click", () => {
-    chrome.tabs.create({ url: BILLING_PORTAL_URL, active: true });
-  });
-  els.upgradeBtn.addEventListener("click", () => {
-    chrome.tabs.create({ url: `${SERVER}/upgrade`, active: true });
-  });
+
 
   /* ── Dates ── */
   els.addDateBtn.addEventListener("click", async () => {
@@ -796,7 +764,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (msg.type === "SG_KILL") {
       console.warn("[SG Popup] Kill switch received:", msg.reason);
       els.masterToggle.checked = false;
-      setStatus(els.subscriptionStatus, `Revoked: ${msg.reason || "killed-by-server"}`, "error");
+      setStatus(els.licenseStatusRow, `Revoked: ${msg.reason || "killed-by-server"}`, "error");
       updateToggleDesc(false, true, false);
     }
   });
