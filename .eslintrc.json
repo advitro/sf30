@@ -1,0 +1,28 @@
+{
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "webextensions": true,
+    "node": true
+  },
+  "extends": ["eslint:recommended"],
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "globals": {
+    "chrome": "readonly",
+    "crypto": "readonly",
+    "SG_CONSTS": "writable",
+    "SG_CRYPTO": "writable",
+    "SG_FINGERPRINT": "writable",
+    "SG_CIRCUIT_BREAKER": "writable"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "varsIgnorePattern": "^_", "argsIgnorePattern": "^_" }],
+    "no-console": ["warn", { "allow": ["error", "warn", "log"] }],
+    "eqeqeq": ["error", "always"],
+    "curly": ["error", "all"],
+    "no-var": "off"
+  }
+}

@@ -1,0 +1,6 @@
+# Build artifacts
+dist/
+node_modules/
+
+# Generated customer packages
+Deploy/shift-grabber-v9.zip
