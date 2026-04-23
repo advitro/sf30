@@ -2,28 +2,27 @@
   "env": {
     "browser": true,
     "es2022": true,
-    "webextensions": true
+    "webextensions": true,
+    "node": true
   },
-  "globals": {
-    "chrome": "readonly",
-    "SG_CONSTS": "readonly",
-    "SG_CRYPTO": "readonly",
-    "SG_FINGERPRINT": "readonly"
-  },
+  "extends": ["eslint:recommended"],
   "parserOptions": {
     "ecmaVersion": 2022,
     "sourceType": "script"
   },
+  "globals": {
+    "chrome": "readonly",
+    "crypto": "readonly",
+    "SG_CONSTS": "writable",
+    "SG_CRYPTO": "writable",
+    "SG_FINGERPRINT": "writable",
+    "SG_CIRCUIT_BREAKER": "writable"
+  },
   "rules": {
-    "no-unused-vars": ["warn", { "args": "none" }],
-    "no-redeclare": ["error", { "builtinGlobals": true }],
-    "no-var": "warn",
-    "prefer-const": "warn",
+    "no-unused-vars": ["warn", { "varsIgnorePattern": "^_", "argsIgnorePattern": "^_" }],
+    "no-console": ["warn", { "allow": ["error", "warn", "log"] }],
     "eqeqeq": ["error", "always"],
     "curly": ["error", "all"],
-    "no-eval": "error",
-    "no-implied-eval": "error",
-    "no-new-func": "error",
-    "no-console": "off"
+    "no-var": "off"
   }
 }
