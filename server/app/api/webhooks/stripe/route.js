@@ -28,6 +28,8 @@ async function POST(request) {
           data: {
             paymentStatus: 'paid',
             status: 'active',
+            subscriptionTier: 'pro',
+            subscriptionStatus: 'active',
             stripeCustomerId: session.customer,
             stripeSubscriptionId: session.subscription,
           },
