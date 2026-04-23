@@ -40,15 +40,22 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist");
   }
   console.log("[E2E] ✓ Popup renders");
 
-  // 2. Test simple/advanced toggle
-  await page.click("#advancedToggleLink");
+  // 2. Test tab switching
+  await page.click("#tabControls");
   await page.waitForTimeout(200);
-  const advancedVisible = await page.evaluate(() => {
-    const el = document.getElementById("advancedPanel");
-    return el && el.style.display !== "none";
+  const controlsVisible = await page.evaluate(() => {
+    const el = document.getElementById("panelControls");
+    return el && !el.hidden;
   });
-  if (!advancedVisible) throw new Error("Advanced panel did not open.");
-  console.log("[E2E] ✓ Advanced panel toggle works");
+  if (!controlsVisible) throw new Error("Controls tab did not open.");
+  await page.click("#tabSettings");
+  await page.waitForTimeout(200);
+  const settingsVisible = await page.evaluate(() => {
+    const el = document.getElementById("panelSettings");
+    return el && !el.hidden;
+  });
+  if (!settingsVisible) throw new Error("Settings tab did not open.");
+  console.log("[E2E] ✓ Tab switching works");
 
   // 3. Test license input
   await page.type("#licenseInput", "sg_test_12345678");

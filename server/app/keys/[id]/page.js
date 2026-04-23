@@ -27,6 +27,8 @@ export default function KeyDetailPage() {
         subscriptionTier: found.subscriptionTier,
         subscriptionStatus: found.subscriptionStatus,
         expiresAt: found.expiresAt ? new Date(found.expiresAt).toISOString().slice(0, 10) : '',
+        telegramBotToken: found.telegramBotToken || '',
+        telegramChatId: found.telegramChatId || '',
       })
     }
     setLoading(false)
@@ -46,6 +48,8 @@ export default function KeyDetailPage() {
         subscriptionTier: edit.subscriptionTier,
         subscriptionStatus: edit.subscriptionStatus,
         expiresAt: edit.expiresAt || null,
+        telegramBotToken: edit.telegramBotToken || null,
+        telegramChatId: edit.telegramChatId || null,
       }),
     })
     setSaving(false)
@@ -190,6 +194,31 @@ export default function KeyDetailPage() {
                   onChange={(e) => setEdit({ ...edit, expiresAt: e.target.value })}
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
                 />
+              </div>
+              <div className="border-t border-slate-800 pt-4">
+                <h3 className="mb-3 text-sm font-medium text-slate-300">Telegram Config</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">Bot Token</label>
+                    <input
+                      type="text"
+                      value={edit.telegramBotToken}
+                      onChange={(e) => setEdit({ ...edit, telegramBotToken: e.target.value })}
+                      placeholder="123456:ABC-DEF..."
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">Chat ID</label>
+                    <input
+                      type="text"
+                      value={edit.telegramChatId}
+                      onChange={(e) => setEdit({ ...edit, telegramChatId: e.target.value })}
+                      placeholder="-1001234567890"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
               </div>
               <button
                 onClick={handleSave}

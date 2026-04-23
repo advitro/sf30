@@ -163,7 +163,8 @@
       SG_TOGGLE_HUD:            { required: [], optional: [] },
       SG_TOGGLE_PAUSE:          { required: [], optional: [] },
       SG_TOGGLE_OVERRIDE:       { required: [], optional: [] },
-      SG_SET_BLACKLIST_DATES:   { required: ["blacklist"], optional: [] }
+      SG_SET_BLACKLIST_DATES:   { required: ["blacklist"], optional: [] },
+      SG_STORE_TELEGRAM_CONFIG: { required: ["botToken", "chatId"], optional: [] }
     },
 
     // ── State Machine States ──

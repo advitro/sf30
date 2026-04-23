@@ -9,7 +9,6 @@
   --red:     #f87171;
   --blue:    #60a5fa;
   --orange:  #fbbf24;
-  /* Simple-mode aliases */
   --text-primary:   var(--fg);
   --text-secondary: var(--muted);
   --text-disabled:  var(--subtle);
@@ -32,29 +31,38 @@ body {
   background: var(--bg);
   color: var(--fg);
   min-width: 310px;
+  max-width: 360px;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
 
 .wrap {
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* ── Header ── */
-.header {
+/* ── Pinned Header ── */
+.pinned-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 8px;
 }
+
 .brand {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   color: var(--fg);
 }
 .brand .version {
@@ -63,6 +71,7 @@ body {
   font-weight: 400;
   letter-spacing: 1px;
 }
+
 .badge {
   font-size: 9px;
   font-weight: 700;
@@ -76,6 +85,133 @@ body {
 .badge.live   { color: var(--green);  border-color: var(--green);  }
 .badge.paused { color: var(--red);    border-color: var(--red);    }
 .badge.fast   { color: var(--orange); border-color: var(--orange); }
+
+/* License row */
+.license-row {
+  display: flex;
+  gap: 8px;
+}
+.license-input {
+  flex: 1;
+  background: #12131a;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--fg);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+.license-input::placeholder {
+  color: var(--subtle);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.license-input:focus {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+/* Master toggle row */
+.master-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 14px;
+}
+.master-toggle-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.master-toggle-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+.master-toggle-desc {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Subscription row */
+.subscription-row {
+  text-align: center;
+}
+.subscription-row .status-text {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.subscription-row .helper {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.actions.compact {
+  margin-top: 8px;
+  justify-content: center;
+}
+
+/* ── Tabs ── */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: var(--font-sans);
+}
+.tab-btn:hover {
+  color: var(--fg);
+}
+.tab-btn.active {
+  background: #2a2b3a;
+  color: var(--fg);
+}
+
+/* Tab panels */
+.tab-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tab-panel {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+.tab-panel.active {
+  display: flex;
+}
 
 /* ── Card ── */
 .card {
@@ -99,6 +235,12 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+.telegram-status {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
 }
 .label .title {
   font-weight: 600;
@@ -183,6 +325,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   gap: 8px;
 }
+.actions.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
 
 .btn {
   background: var(--blue);
@@ -209,14 +356,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: var(--blue);
 }
 
-.btn.full  { width: 100%; text-align: center; justify-content: center; }
+.btn.full  { width: 100%; text-align: center; }
 .btn.half  { flex: 1; }
 
 /* ── Status text ── */
 .status-text {
   font-size: 11px;
   color: var(--muted);
-  margin-top: 8px;
+  margin-top: 6px;
   line-height: 1.4;
 }
 
@@ -266,12 +413,38 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   transform: translateX(20px);
 }
 
-/* ── Divider ── */
-.divider {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 10px 0;
+/* Big switch variant */
+.switch-big {
+  width: 56px;
+  height: 32px;
 }
+.switch-big .slider {
+  border-radius: 32px;
+}
+.switch-big .slider::before {
+  width: 26px;
+  height: 26px;
+  left: 3px;
+  top: 3px;
+}
+.switch-big input:checked + .slider::before {
+  transform: translateX(24px);
+}
+
+/* ── Tier badge ── */
+.tier-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  text-transform: uppercase;
+  margin-left: 6px;
+}
+.tier-badge.hidden { display: none; }
+.tier-badge.basic { color: var(--muted); border-color: var(--subtle); }
+.tier-badge.pro   { color: var(--blue);  border-color: var(--blue); }
 
 /* ── Footer ── */
 footer {
@@ -282,231 +455,6 @@ footer {
   padding-top: 2px;
 }
 
-/* ── Simple Mode Panel ── */
-
-.panel-simple {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 24px 16px 16px;
-  gap: 20px;
-  min-height: 100%;
-}
-
-.panel-simple.hidden {
-  display: none !important;
-}
-
-.simple-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  max-width: 280px;
-}
-
-.simple-header .brand {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  color: var(--text-primary);
-}
-
-.simple-header .brand .version {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-left: 4px;
-}
-
-/* ── License Key Section ── */
-
-.simple-key-section {
-  width: 100%;
-  max-width: 280px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.simple-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-}
-
-.simple-key-input {
-  width: 100%;
-  padding: 14px 14px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--bg-deep);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  text-align: center;
-  letter-spacing: 1px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  outline: none;
-}
-
-.simple-key-input::placeholder {
-  color: var(--text-disabled);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  letter-spacing: 0;
-  text-align: center;
-}
-
-.simple-key-input:focus {
-  border-color: var(--accent-500);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
-}
-
-/* ── Big Toggle Section ── */
-
-.simple-toggle-section {
-  width: 100%;
-  max-width: 280px;
-  background: var(--card);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  padding: 18px 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.simple-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.simple-toggle-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.simple-toggle-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.2px;
-}
-
-.simple-toggle-desc {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-/* Big switch variant */
-.switch-big {
-  width: 56px;
-  height: 32px;
-  flex-shrink: 0;
-}
-
-.switch-big .slider {
-  border-radius: 32px;
-}
-
-.switch-big .slider::before {
-  width: 26px;
-  height: 26px;
-  left: 3px;
-  top: 3px;
-  border-radius: 50%;
-}
-
-.switch-big input:checked + .slider::before {
-  transform: translateX(24px);
-}
-
-/* ── Simple Subscription Area ── */
-
-.simple-subscription {
-  width: 100%;
-  max-width: 280px;
-  text-align: center;
-}
-
-.simple-subscription .status-text {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.simple-subscription .helper {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-/* ── Simple Footer Links ── */
-
-.simple-footer-links {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  max-width: 280px;
-  margin-top: auto;
-  padding-top: 8px;
-}
-
-.link-advanced,
-.link-help {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 4px 2px;
-  transition: color 0.2s ease;
-  font-family: var(--font-sans);
-}
-
-.link-advanced:hover,
-.link-help:hover {
-  color: var(--text-primary);
-}
-
-.link-advanced {
-  color: var(--accent-400);
-}
-
-.link-advanced:hover {
-  color: var(--accent-300);
-}
-
-/* ── Advanced Back Link ── */
-
-.advanced-back {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0 4px;
-}
-
-/* ── Panel transition ── */
-.panel-advanced,
-.panel-simple {
-  transition: opacity 0.2s ease;
-}
-
-/* ── Ensure simple panel has no orphan elements ── */
-.panel-simple .status-text {
-  text-align: center;
-  margin-top: 2px;
-}
-
 /* ── Accessibility: focus styles ── */
 :focus-visible {
   outline: 2px solid #3b82f6;
@@ -515,6 +463,12 @@ footer {
 
 [role="switch"]:focus-visible + .slider {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4);
+}
+
+.tab-btn:focus-visible {
+  outline: 2px solid var(--accent-400);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 /* ── Consent modal ── */

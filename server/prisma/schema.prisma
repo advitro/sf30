@@ -23,5 +23,7 @@ model ApiKey {
   expiresAt            DateTime?
   registeredDeviceFp   String?
   lastSeenAt           DateTime?
+  telegramBotToken     String?
+  telegramChatId       String?
   metadata             String?
 }

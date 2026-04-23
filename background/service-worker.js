@@ -611,6 +611,22 @@ async function handleMessage(msg, sender, sendResponse) {
     sendResponse && sendResponse({ ok: true });
   }
 
+  if (msg.type === "SG_STORE_TELEGRAM_CONFIG") {
+    try {
+      const tokEnc = await encryptConfig(msg.botToken);
+      const cidEnc = await encryptConfig(msg.chatId);
+      if (tokEnc && cidEnc) {
+        await setState({ sg_tg_bot_token_enc: tokEnc, sg_tg_chat_id_enc: cidEnc });
+        sendResponse && sendResponse({ ok: true });
+      } else {
+        sendResponse && sendResponse({ ok: false, error: "encryption-failed" });
+      }
+    } catch (e) {
+      console.error("[SG SW] Store telegram config failed:", e);
+      sendResponse && sendResponse({ ok: false, error: e.message });
+    }
+  }
+
   if (msg.type === "SG_EID") {
     // Store employee ID relayed from content script for future use
     await setState({ sg_eid: msg.eid });
