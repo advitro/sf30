@@ -5,6 +5,8 @@
  * - SQLite:   better-sqlite3 (local development)
  */
 
+import { neon } from '@neondatabase/serverless';
+
 const IS_POSTGRES = process.env.VERCEL === '1' || process.env.VERCEL_ENV || process.env.POSTGRES_URL || process.env.DATABASE_URL;
 
 let _db = null;
@@ -26,17 +28,6 @@ async function initDb() {
 }
 
 async function initPostgres() {
-  let neon;
-  try {
-    const mod = await import('@neondatabase/serverless');
-    neon = mod.neon;
-  } catch (e) {
-    throw new Error(
-      'Postgres driver not found. Install it: npm install @neondatabase/serverless\n' +
-        'Or unset POSTGRES_URL / DATABASE_URL to use SQLite locally.'
-    );
-  }
-
   const DATABASE_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL;
   if (!DATABASE_URL) {
     throw new Error('POSTGRES_URL or DATABASE_URL must be set for Postgres mode');

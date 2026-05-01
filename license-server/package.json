@@ -1,0 +1,29 @@
+{
+  "name": "sf30-license-server",
+  "version": "1.0.0",
+  "description": "SF30 V2 License Server — device-bound key activation",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "key": "node scripts/generate-key.js",
+    "vercel:link": "vercel link",
+    "vercel:pull": "vercel pull --yes --environment=production",
+    "vercel:build": "vercel build",
+    "vercel:deploy": "vercel --prod",
+    "deploy:check": "node scripts/check-deploy-readiness.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
