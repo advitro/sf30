@@ -14,7 +14,11 @@
 
     // Stable properties — never fail
     components.push(navigator.userAgent || "");
-    components.push(screen.width + "x" + screen.height + "x" + screen.colorDepth);
+    components.push(
+      typeof screen !== "undefined"
+        ? screen.width + "x" + screen.height + "x" + screen.colorDepth
+        : "no-screen"
+    );
     components.push(navigator.language || "");
     // Use fixed epoch to avoid DST changes altering the fingerprint
     components.push(new Date("2000-01-01T00:00:00Z").getTimezoneOffset());
