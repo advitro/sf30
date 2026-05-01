@@ -172,6 +172,7 @@
         <input type="text" id="keyInput" readonly value="">
         <button class="copy-btn" onclick="copyKey()">Copy</button>
       </div>
+      <p style="margin-top: 12px; font-size: 13px; color: var(--muted);" id="expiryDisplay"></p>
     </div>
 
     <div id="actionBox" style="display:none;">
@@ -203,7 +204,7 @@ function getParam(name) {
   return url.searchParams.get(name);
 }
 
-const paymentId = getParam('payment_id');
+const invoiceId = getParam('invoice_id');
 const keyDisplay = document.getElementById('keyDisplay');
 const keyInput = document.getElementById('keyInput');
 const statusIcon = document.getElementById('statusIcon');
@@ -211,13 +212,21 @@ const statusTitle = document.getElementById('statusTitle');
 const statusSubtitle = document.getElementById('statusSubtitle');
 const keyBox = document.getElementById('keyBox');
 const actionBox = document.getElementById('actionBox');
+const expiryDisplay = document.getElementById('expiryDisplay');
 
-function showKey(key) {
+function formatDate(ts) {
+  if (!ts) return 'N/A';
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function showKey(key, expiresAt) {
   statusIcon.textContent = '✓';
   statusTitle.textContent = 'Payment Successful!';
-  statusSubtitle.textContent = 'Your license key has been generated. Save it somewhere safe — it can\'t be shown again.';
+  statusSubtitle.textContent = 'Your license is active. Save your key somewhere safe.';
   keyDisplay.textContent = key;
   keyInput.value = key;
+  expiryDisplay.textContent = 'License expires: ' + formatDate(expiresAt) + '. Renew anytime to extend.';
   keyBox.style.display = 'block';
   actionBox.style.display = 'block';
 }
@@ -229,18 +238,22 @@ function showError(msg) {
 }
 
 async function pollStatus() {
-  if (!paymentId) {
-    showError('Missing payment ID. Please try purchasing again.');
+  if (!invoiceId) {
+    showError('Missing invoice ID. Please try purchasing again.');
     return;
   }
 
   try {
-    const res = await fetch('/api/payment-status?payment_id=' + encodeURIComponent(paymentId));
+    const res = await fetch('/api/payment-status?invoice_id=' + encodeURIComponent(invoiceId));
     const data = await res.json();
 
     if (data.status === 'completed' && data.key) {
-      showKey(data.key);
+      showKey(data.key, data.expiresAt);
       return;
+    }
+
+    if (data.status === 'processing') {
+      statusSubtitle.textContent = 'Payment confirmed! Generating your license...';
     }
 
     // Still pending — poll again in 3s

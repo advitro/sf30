@@ -69,6 +69,17 @@ async function initPostgres() {
       completed_at INTEGER
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS renewals (
+      id SERIAL PRIMARY KEY,
+      license_key TEXT NOT NULL REFERENCES licenses(key),
+      invoice_id TEXT,
+      amount_cad TEXT,
+      paid_at INTEGER,
+      period_start INTEGER,
+      period_end INTEGER
+    )
+  `;
 
   return {
     async createLicense({ key, fingerprintHash, tier, createdAt, expiresAt }) {
@@ -128,6 +139,22 @@ async function initPostgres() {
         WHERE payment_id = ${paymentId}
       `;
     },
+    async extendLicenseExpiry(key, newExpiresAt) {
+      await sql`
+        UPDATE licenses SET expires_at = ${newExpiresAt} WHERE key = ${key}
+      `;
+    },
+    async recordRenewal({ licenseKey, invoiceId, amountCad, paidAt, periodStart, periodEnd }) {
+      await sql`
+        INSERT INTO renewals (license_key, invoice_id, amount_cad, paid_at, period_start, period_end)
+        VALUES (${licenseKey}, ${invoiceId}, ${amountCad}, ${paidAt}, ${periodStart}, ${periodEnd})
+      `;
+    },
+    async getLicenseRenewals(key) {
+      return sql`
+        SELECT * FROM renewals WHERE license_key = ${key} ORDER BY period_start DESC
+      `;
+    },
   };
 }
 
@@ -182,6 +209,17 @@ async function initSQLite() {
       completed_at INTEGER
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS renewals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_key TEXT NOT NULL REFERENCES licenses(key),
+      invoice_id TEXT,
+      amount_cad TEXT,
+      paid_at INTEGER,
+      period_start INTEGER,
+      period_end INTEGER
+    )
+  `).run();
 
   const stmts = {
     insert: db.prepare(
@@ -206,6 +244,11 @@ async function initSQLite() {
     completePendingPayment: db.prepare(
       'UPDATE pending_payments SET status = ?, license_key = ?, completed_at = ? WHERE payment_id = ?'
     ),
+    extendLicenseExpiry: db.prepare('UPDATE licenses SET expires_at = ? WHERE key = ?'),
+    insertRenewal: db.prepare(
+      'INSERT INTO renewals (license_key, invoice_id, amount_cad, paid_at, period_start, period_end) VALUES (?, ?, ?, ?, ?, ?)'
+    ),
+    findRenewals: db.prepare('SELECT * FROM renewals WHERE license_key = ? ORDER BY period_start DESC'),
   };
 
   return {
@@ -226,6 +269,10 @@ async function initSQLite() {
     getPendingPayment: (paymentId) => stmts.findPendingPayment.get(paymentId) || null,
     completePendingPayment: (paymentId, { licenseKey, completedAt }) =>
       stmts.completePendingPayment.run('completed', licenseKey, completedAt, paymentId),
+    extendLicenseExpiry: (key, newExpiresAt) => stmts.extendLicenseExpiry.run(newExpiresAt, key),
+    recordRenewal: ({ licenseKey, invoiceId, amountCad, paidAt, periodStart, periodEnd }) =>
+      stmts.insertRenewal.run(licenseKey, invoiceId, amountCad, paidAt, periodStart, periodEnd),
+    getLicenseRenewals: (key) => stmts.findRenewals.all(key),
   };
 }
 
@@ -277,4 +324,16 @@ export async function getPendingPayment(...args) {
 export async function completePendingPayment(...args) {
   const db = await getDb();
   return db.completePendingPayment(...args);
+}
+export async function extendLicenseExpiry(...args) {
+  const db = await getDb();
+  return db.extendLicenseExpiry(...args);
+}
+export async function recordRenewal(...args) {
+  const db = await getDb();
+  return db.recordRenewal(...args);
+}
+export async function getLicenseRenewals(...args) {
+  const db = await getDb();
+  return db.getLicenseRenewals(...args);
 }

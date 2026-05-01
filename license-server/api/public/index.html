@@ -206,7 +206,7 @@
     <h1>Shift Grabber</h1>
     <p class="subtitle">Never miss a shift again. Auto-claim Amazon AtoZ shifts with sub-second detection, burst reloads, and Telegram alerts.</p>
     <div class="cta-row">
-      <a href="#buy" class="btn btn-primary">Buy License — 99 CAD</a>
+      <a href="#buy" class="btn btn-primary">Subscribe — 99 CAD/month</a>
       <a href="/download/shift-grabber.zip" class="btn btn-ghost" download>Download Extension</a>
     </div>
   </div>
@@ -246,22 +246,30 @@
 
 <section id="buy">
   <div class="container">
-    <h2>Get Your License</h2>
+    <h2>Subscribe</h2>
     <div style="max-width: 400px; margin: 0 auto;">
       <div class="plan popular">
-        <div class="plan-badge">LIFETIME</div>
-        <h3>Shift Grabber License</h3>
-        <div class="price">99<span> CAD</span></div>
+        <div class="plan-badge">MONTHLY</div>
+        <h3>Shift Grabber</h3>
+        <div class="price">99<span> CAD / month</span></div>
         <ul>
           <li>1 device license</li>
-          <li>Lifetime access</li>
           <li>Sub-second claim</li>
           <li>Burst reloads</li>
           <li>Telegram alerts</li>
-          <li>All future updates</li>
+          <li>All features included</li>
+          <li>Cancel anytime</li>
         </ul>
-        <button class="btn btn-primary" onclick="checkout()" style="width:100%">Buy Now</button>
+        <button class="btn btn-primary" onclick="checkout()" style="width:100%">Subscribe Now</button>
+        <p style="margin-top:12px;font-size:12px;color:var(--muted);">License valid for 30 days from payment. Renew anytime to keep access.</p>
       </div>
+    </div>
+
+    <div style="max-width: 400px; margin: 32px auto 0; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
+      <h3 style="font-size: 16px; margin-bottom: 12px;">Renew Existing License</h3>
+      <p style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">Already have a key? Extend it by 30 days without reinstalling.</p>
+      <input type="text" id="renewKey" placeholder="Enter your license key (e.g. sf30-XXXX-...)" style="width:100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; color: var(--fg); font-family: ui-monospace, monospace; font-size: 13px; margin-bottom: 12px; box-sizing: border-box;">
+      <button class="btn btn-ghost" onclick="checkoutRenewal()" style="width:100%">Renew for 99 CAD</button>
     </div>
   </div>
 </section>
@@ -299,12 +307,43 @@ async function checkout() {
       window.location.href = data.url;
     } else {
       alert(data.error || 'Checkout failed. Please try again.');
-      btn.textContent = 'Buy Now';
+      btn.textContent = 'Subscribe Now';
       btn.disabled = false;
     }
   } catch (e) {
     alert('Network error. Please try again.');
-    btn.textContent = 'Buy Now';
+    btn.textContent = 'Subscribe Now';
+    btn.disabled = false;
+  }
+}
+
+async function checkoutRenewal() {
+  const input = document.getElementById('renewKey');
+  const key = input.value.trim();
+  if (!key || !key.startsWith('sf30-')) {
+    alert('Please enter a valid license key (starts with sf30-)');
+    return;
+  }
+  const btn = event.target;
+  btn.textContent = 'Loading...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ renewKey: key })
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      alert(data.error || 'Checkout failed. Please try again.');
+      btn.textContent = 'Renew for 99 CAD';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    alert('Network error. Please try again.');
+    btn.textContent = 'Renew for 99 CAD';
     btn.disabled = false;
   }
 }
