@@ -15,7 +15,7 @@ import cors from 'cors';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { createLicense, getLicense, activateLicense, listRevoked } from './db.js';
+import { createLicense, getLicense, activateLicense, listRevoked, createCustomer } from './db.js';
 import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +27,9 @@ const API_TOKEN = process.env.API_TOKEN;
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: '*' }));
+
+// ── Static files (landing page, download, success page) ──
+app.use(express.static(join(__dirname, 'public')));
 
 // ── Helpers ──
 
@@ -176,6 +179,56 @@ app.get('/api/v2/revocations', async (req, res) => {
     console.error('[revocations]', err);
     return res.status(500).json({ ok: false, error: 'Server error' });
   }
+});
+
+// ── Checkout (Stripe or demo fallback) ──
+
+app.post('/api/checkout', async (req, res) => {
+  const { tier, email } = req.body || {};
+  const selectedTier = tier === 'pro' ? 'pro' : 'basic';
+
+  // If Stripe is not configured, generate a demo key immediately
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecret) {
+    const key = generateLicenseKey();
+    const now = nowSeconds();
+    const expiresAt = daysFromNow(DEFAULT_DAYS);
+    try {
+      await createLicense({
+        key,
+        fingerprintHash: null,
+        tier: selectedTier,
+        createdAt: now,
+        expiresAt,
+      });
+      if (email) {
+        await createCustomer({
+          email,
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+          licenseKey: key,
+          tier: selectedTier,
+          createdAt: now,
+        });
+      }
+      return res.json({ ok: true, demoKey: key, tier: selectedTier, note: 'Stripe not configured — demo key generated' });
+    } catch (e) {
+      console.error('[checkout]', e);
+      return res.status(500).json({ ok: false, error: 'Key generation failed' });
+    }
+  }
+
+  // TODO: Integrate Stripe Checkout Session creation here
+  // const session = await stripe.checkout.sessions.create({...});
+  // return res.json({ ok: true, url: session.url });
+  return res.status(501).json({ ok: false, error: 'Stripe integration not yet implemented' });
+});
+
+// ── Download ──
+
+app.get('/download', (_req, res) => {
+  const zipPath = join(__dirname, 'public', 'download', 'shift-grabber.zip');
+  res.download(zipPath, 'shift-grabber.zip');
 });
 
 // ── Admin ──

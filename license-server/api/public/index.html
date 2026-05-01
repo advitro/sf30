@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shift Grabber — Auto-Claim Amazon AtoZ Shifts</title>
+  <style>
+    :root {
+      --bg: #0a0b14;
+      --card: #16171f;
+      --border: #2c2d3a;
+      --fg: #e8eaf6;
+      --muted: #6b6e85;
+      --blue: #60a5fa;
+      --green: #4ade80;
+      --purple: #a78bfa;
+      --font: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    header {
+      padding: 48px 0 32px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(96, 165, 250, 0.12);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 999px;
+      margin-bottom: 20px;
+      letter-spacing: 0.3px;
+    }
+    h1 {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 12px;
+      line-height: 1.15;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 18px;
+      max-width: 520px;
+      margin: 0 auto 28px;
+    }
+    .cta-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: transform 0.15s, opacity 0.15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--blue);
+      color: #0a0b12;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    section {
+      padding: 56px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .feature {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+    }
+    .feature h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--blue);
+    }
+    .feature p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .pricing {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .plan {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 24px;
+      text-align: center;
+      position: relative;
+    }
+    .plan.popular {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 1px var(--blue);
+    }
+    .plan-badge {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--blue);
+      color: #0a0b12;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 999px;
+    }
+    .plan h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .price {
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 16px;
+    }
+    .price span {
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .plan ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 24px;
+      text-align: left;
+    }
+    .plan li {
+      padding: 6px 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .plan li::before {
+      content: "✓ ";
+      color: var(--green);
+      font-weight: 700;
+    }
+    .download-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+    }
+    .download-box h2 { margin-bottom: 12px; }
+    .download-box p { color: var(--muted); margin-bottom: 24px; }
+    footer {
+      padding: 32px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 640px) {
+      h1 { font-size: 32px; }
+      .price { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="badge">Chrome Extension</div>
+    <h1>Shift Grabber</h1>
+    <p class="subtitle">Never miss a shift again. Auto-claim Amazon AtoZ shifts with sub-second detection, burst reloads, and Telegram alerts.</p>
+    <div class="cta-row">
+      <a href="#pricing" class="btn btn-primary">Get License Key</a>
+      <a href="/download/shift-grabber.zip" class="btn btn-ghost" download>Download Extension</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="container">
+    <h2>Why Shift Grabber?</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>⚡ Sub-Second Claim</h3>
+        <p>Polls every 1s per tab and claims shifts the instant they appear. No more manual refreshing.</p>
+      </div>
+      <div class="feature">
+        <h3>🔄 Burst Reloads</h3>
+        <p>Automatically reloads all AtoZ tabs at 5-minute marks to catch newly posted shifts before anyone else.</p>
+      </div>
+      <div class="feature">
+        <h3>📱 Telegram Alerts</h3>
+        <p>Get instant notifications on your phone every time a shift is grabbed successfully.</p>
+      </div>
+      <div class="feature">
+        <h3>🔒 License Protected</h3>
+        <p>Device-bound license keys prevent sharing. One key = one device. Revoke anytime from admin.</p>
+      </div>
+      <div class="feature">
+        <h3>🎯 HUD Overlay</h3>
+        <p>Real-time heads-up display showing next claim time, burst count, and status — right on the page.</p>
+      </div>
+      <div class="feature">
+        <h3>⚙️ Fully Configurable</h3>
+        <p>Set blacklist dates, toggle speed modes, pause/resume, and customize polling intervals.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="container">
+    <h2>Pricing</h2>
+    <div class="pricing">
+      <div class="plan">
+        <h3>Basic</h3>
+        <div class="price">$19<span>/mo</span></div>
+        <ul>
+          <li>1 device license</li>
+          <li>Standard polling (1s)</li>
+          <li>Telegram alerts</li>
+          <li>Email support</li>
+        </ul>
+        <button class="btn btn-ghost" onclick="checkout('basic')" style="width:100%">Choose Basic</button>
+      </div>
+      <div class="plan popular">
+        <div class="plan-badge">POPULAR</div>
+        <h3>Pro</h3>
+        <div class="price">$39<span>/mo</span></div>
+        <ul>
+          <li>2 device licenses</li>
+          <li>Turbo polling (500ms)</li>
+          <li>Telegram alerts</li>
+          <li>Priority support</li>
+          <li>Early access to features</li>
+        </ul>
+        <button class="btn btn-primary" onclick="checkout('pro')" style="width:100%">Choose Pro</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <div class="download-box">
+      <h2>Download</h2>
+      <p>Already have a license key? Download the extension and activate it in Chrome.</p>
+      <a href="/download/shift-grabber.zip" class="btn btn-primary" download>Download shift-grabber-v9.zip</a>
+      <p style="margin-top:16px;font-size:13px;color:var(--muted);">Chrome Extension · Manifest V3 · ~270 KB</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Shift Grabber · Not affiliated with Amazon · For educational use only</p>
+  </div>
+</footer>
+
+<script>
+async function checkout(tier) {
+  const btn = event.target;
+  btn.textContent = 'Loading...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier })
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else if (data.demoKey) {
+      window.location.href = '/success.html?key=' + encodeURIComponent(data.demoKey) + '&tier=' + tier;
+    } else {
+      alert(data.error || 'Checkout failed. Please try again.');
+      btn.textContent = tier === 'pro' ? 'Choose Pro' : 'Choose Basic';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    alert('Network error. Please try again.');
+    btn.textContent = tier === 'pro' ? 'Choose Pro' : 'Choose Basic';
+    btn.disabled = false;
+  }
+}
+</script>
+
+</body>
+</html>

@@ -47,6 +47,17 @@ async function initPostgres() {
       revoked INTEGER DEFAULT 0
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      email TEXT,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      license_key TEXT REFERENCES licenses(key),
+      tier TEXT,
+      created_at INTEGER
+    )
+  `;
 
   return {
     async createLicense({ key, fingerprintHash, tier, createdAt, expiresAt }) {
@@ -80,6 +91,16 @@ async function initPostgres() {
         FROM licenses ORDER BY created_at DESC
       `;
     },
+    async createCustomer({ email, stripeCustomerId, stripeSubscriptionId, licenseKey, tier, createdAt }) {
+      await sql`
+        INSERT INTO customers (email, stripe_customer_id, stripe_subscription_id, license_key, tier, created_at)
+        VALUES (${email}, ${stripeCustomerId}, ${stripeSubscriptionId}, ${licenseKey}, ${tier}, ${createdAt})
+      `;
+    },
+    async getCustomerByLicense(key) {
+      const rows = await sql`SELECT * FROM customers WHERE license_key = ${key}`;
+      return rows[0] || null;
+    },
   };
 }
 
@@ -112,6 +133,17 @@ async function initSQLite() {
       revoked INTEGER DEFAULT 0
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      license_key TEXT REFERENCES licenses(key),
+      tier TEXT,
+      created_at INTEGER
+    )
+  `).run();
 
   const stmts = {
     insert: db.prepare(
@@ -125,6 +157,10 @@ async function initSQLite() {
     listAll: db.prepare(
       'SELECT key, fingerprint_hash, tier, created_at, activated_at, expires_at, revoked FROM licenses ORDER BY created_at DESC'
     ),
+    insertCustomer: db.prepare(
+      'INSERT INTO customers (email, stripe_customer_id, stripe_subscription_id, license_key, tier, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ),
+    findCustomerByLicense: db.prepare('SELECT * FROM customers WHERE license_key = ?'),
   };
 
   return {
@@ -137,6 +173,9 @@ async function initSQLite() {
     deleteLicense: (key) => stmts.delete.run(key),
     listRevoked: () => stmts.listRevoked.all(),
     listAll: () => stmts.listAll.all(),
+    createCustomer: ({ email, stripeCustomerId, stripeSubscriptionId, licenseKey, tier, createdAt }) =>
+      stmts.insertCustomer.run(email, stripeCustomerId, stripeSubscriptionId, licenseKey, tier, createdAt),
+    getCustomerByLicense: (key) => stmts.findCustomerByLicense.get(key) || null,
   };
 }
 
@@ -168,4 +207,12 @@ export async function listRevoked(...args) {
 export async function listAll(...args) {
   const db = await getDb();
   return db.listAll(...args);
+}
+export async function createCustomer(...args) {
+  const db = await getDb();
+  return db.createCustomer(...args);
+}
+export async function getCustomerByLicense(...args) {
+  const db = await getDb();
+  return db.getCustomerByLicense(...args);
 }
