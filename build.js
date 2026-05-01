@@ -17,7 +17,6 @@ try {
 }
 
 const SRC_DIR = path.resolve(__dirname);
-const DIST_DIR = path.resolve(__dirname, "dist");
 
 // Files to obfuscate (relative to project root)
 const OBFUSCATE_PATTERNS = [
@@ -50,7 +49,7 @@ const OBF_CONFIG = {
   deadCodeInjectionThreshold: 0.4,
   debugProtection: true,
   debugProtectionInterval: 4000,
-  disableConsoleOutput: true,
+  disableConsoleOutput: false,
   identifierNamesGenerator: "mangled",
   log: false,
   numbersToExpressions: true,
@@ -153,6 +152,11 @@ function copyGlob(pattern, baseDir) {
 function obfuscateFile(srcPath, destPath, customConfig) {
   ensureDir(path.dirname(destPath));
   const code = fs.readFileSync(srcPath, "utf-8");
+  if (ENV_CONFIG.OBFUSCATE === false) {
+    fs.writeFileSync(destPath, code, "utf-8");
+    console.log("📄 Copied (debug):", path.relative(SRC_DIR, srcPath));
+    return;
+  }
   const config = customConfig || OBF_CONFIG;
   const result = JavaScriptObfuscator.obfuscate(code, config);
   fs.writeFileSync(destPath, result.getObfuscatedCode(), "utf-8");
@@ -173,6 +177,7 @@ if (!ENV_CONFIG) {
   console.error("❌ Unknown environment:", ENV);
   process.exit(1);
 }
+const DIST_DIR = path.resolve(__dirname, ENV_CONFIG.OBFUSCATE !== false ? "dist" : "dist-debug");
 
 // HMAC key for Telegram credential encryption — must be provided
 const hmacKey = process.env.SG_HMAC_KEY;
@@ -317,44 +322,53 @@ if (fs.existsSync(swPath)) {
 }
 
 // Build-time global name randomization — prevents attackers from calling exposed APIs
-const GLOBAL_NAMES = ["SG_CONSTS", "SG_CRYPTO", "SG_FINGERPRINT", "SG_CIRCUIT_BREAKER", "SG_LICENSE"];
-const globalNameMap = {};
-const randName = () => "_" + crypto.randomBytes(6).toString("hex");
-GLOBAL_NAMES.forEach((name) => { globalNameMap[name] = randName(); });
+// Skipped in debug mode for readability
+if (ENV_CONFIG.OBFUSCATE !== false) {
+  const GLOBAL_NAMES = ["SG_CONSTS", "SG_CRYPTO", "SG_FINGERPRINT", "SG_CIRCUIT_BREAKER", "SG_LICENSE"];
+  const globalNameMap = {};
+  const randName = () => "_" + crypto.randomBytes(6).toString("hex");
+  GLOBAL_NAMES.forEach((name) => { globalNameMap[name] = randName(); });
 
-for (const pattern of OBFUSCATE_PATTERNS) {
-  const dest = path.join(DIST_DIR, pattern);
-  if (fs.existsSync(dest)) {
-    let code = fs.readFileSync(dest, "utf-8");
-    for (const [oldName, newName] of Object.entries(globalNameMap)) {
-      code = code.split(oldName).join(newName);
+  for (const pattern of OBFUSCATE_PATTERNS) {
+    const dest = path.join(DIST_DIR, pattern);
+    if (fs.existsSync(dest)) {
+      let code = fs.readFileSync(dest, "utf-8");
+      for (const [oldName, newName] of Object.entries(globalNameMap)) {
+        code = code.split(oldName).join(newName);
+      }
+      fs.writeFileSync(dest, code, "utf-8");
     }
-    fs.writeFileSync(dest, code, "utf-8");
   }
+  console.log("🔀 Randomized global names:", Object.entries(globalNameMap).map(([k, v]) => `${k}→${v}`).join(", "));
+} else {
+  console.log("🔀 Global name randomization skipped (debug mode)");
 }
-console.log("🔀 Randomized global names:", Object.entries(globalNameMap).map(([k, v]) => `${k}→${v}`).join(", "));
 console.log("🔀 Randomized message secret for inter-script validation");
 
-// Sync dist/ to Deploy/extension/ for customer-ready package
-const DEPLOY_EXT_DIR = path.resolve(__dirname, "Deploy/extension");
-if (fs.existsSync(DEPLOY_EXT_DIR)) {
-  fs.rmSync(DEPLOY_EXT_DIR, { recursive: true });
-}
-function copyRecursive(src, dest) {
-  ensureDir(dest);
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
+// Sync dist/ to Deploy/extension/ for customer-ready package (skip for debug builds)
+if (ENV_CONFIG.OBFUSCATE !== false) {
+  const DEPLOY_EXT_DIR = path.resolve(__dirname, "Deploy/extension");
+  if (fs.existsSync(DEPLOY_EXT_DIR)) {
+    fs.rmSync(DEPLOY_EXT_DIR, { recursive: true });
+  }
+  function copyRecursive(src, dest) {
+    ensureDir(dest);
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        copyRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
     }
   }
+  copyRecursive(DIST_DIR, DEPLOY_EXT_DIR);
+  console.log("📦 Synced dist/ → Deploy/extension/");
+} else {
+  console.log("📦 Deploy sync skipped (debug mode)");
 }
-copyRecursive(DIST_DIR, DEPLOY_EXT_DIR);
-console.log("📦 Synced dist/ → Deploy/extension/");
 
 console.log("\n✅ Build complete:", DIST_DIR);
 console.log("📦 Next: run `npm run build:zip` or upload Deploy/extension/ to Chrome Web Store.");

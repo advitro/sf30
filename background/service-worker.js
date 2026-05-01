@@ -513,6 +513,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  * @returns {Promise<boolean|void>}
  */
 async function handleMessage(msg, sender, sendResponse) {
+  console.log("[SG SW] Received message:", msg.type, "from:", sender.id ? sender.id.slice(0, 8) + "..." : "unknown");
   if (msg.type === "SG_VERIFY_LICENSE") {
     const key = msg.key;
     const data = await new Promise(r => chrome.storage.local.get({ [K.DEVICE_ID]: "" }, r));
@@ -701,8 +702,15 @@ function serverConfigured() {
  * @returns {Promise<{ok:boolean, tier?:string, exp?:number, reason?:string}>}
  */
 async function activateWithServer(key, fingerprintHash) {
-  if (!serverConfigured()) {return { ok: false, reason: "server-unreachable" };}
-  if (_cb.isOpen()) {return { ok: false, reason: "server-unreachable" };}
+  console.log("[SG SW] activateWithServer — key:", key ? key.slice(0, 8) + "..." : "null", "fp:", fingerprintHash ? fingerprintHash.slice(0, 16) + "..." : "null");
+  if (!serverConfigured()) {
+    console.warn("[SG SW] Server not configured — URL:", SERVER_URL);
+    return { ok: false, reason: "server-unreachable" };
+  }
+  if (_cb.isOpen()) {
+    console.warn("[SG SW] Circuit breaker OPEN — skipping server call");
+    return { ok: false, reason: "server-unreachable" };
+  }
 
   try {
     const res = await fetch(SERVER_URL + "/api/v2/activate", {
@@ -716,10 +724,12 @@ async function activateWithServer(key, fingerprintHash) {
     persistCircuitBreaker();
 
     if (data.ok) {
+      console.log("[SG SW] Server activate OK — tier:", data.tier, "exp:", data.exp);
       return { ok: true, tier: data.tier, exp: data.exp };
     }
     // Map server errors to canonical reasons
     const err = (data.error || "").toLowerCase();
+    console.warn("[SG SW] Server activate error:", data.error, "→ mapping to reason");
     if (err.includes("revoked")) {return { ok: false, reason: "revoked" };}
     if (err.includes("expired")) {return { ok: false, reason: "expired" };}
     if (err.includes("mismatch")) {return { ok: false, reason: "device-limit-exceeded" };}
@@ -728,7 +738,7 @@ async function activateWithServer(key, fingerprintHash) {
   } catch (e) {
     _cb.record(false);
     persistCircuitBreaker();
-    console.warn("[SG SW] Server activate failed:", e.message);
+    console.warn("[SG SW] Server activate failed (network/exception):", e.message);
     return { ok: false, reason: "server-unreachable" };
   }
 }
@@ -738,8 +748,15 @@ async function activateWithServer(key, fingerprintHash) {
  * @returns {Promise<{ok:boolean, tier?:string, exp?:number, reason?:string}>}
  */
 async function validateWithServer(key, fingerprintHash) {
-  if (!serverConfigured()) {return { ok: false, reason: "server-unreachable" };}
-  if (_cb.isOpen()) {return { ok: false, reason: "server-unreachable" };}
+  console.log("[SG SW] validateWithServer — key:", key ? key.slice(0, 8) + "..." : "null");
+  if (!serverConfigured()) {
+    console.warn("[SG SW] Server not configured");
+    return { ok: false, reason: "server-unreachable" };
+  }
+  if (_cb.isOpen()) {
+    console.warn("[SG SW] Circuit breaker OPEN — skipping validation");
+    return { ok: false, reason: "server-unreachable" };
+  }
 
   try {
     const res = await fetch(SERVER_URL + "/api/v2/validate", {
@@ -753,9 +770,11 @@ async function validateWithServer(key, fingerprintHash) {
     persistCircuitBreaker();
 
     if (data.ok) {
+      console.log("[SG SW] Server validate OK — tier:", data.tier, "exp:", data.exp);
       return { ok: true, tier: data.tier, exp: data.exp };
     }
     const err = (data.error || "").toLowerCase();
+    console.warn("[SG SW] Server validate error:", data.error);
     if (err.includes("revoked")) {return { ok: false, reason: "revoked" };}
     if (err.includes("expired")) {return { ok: false, reason: "expired" };}
     if (err.includes("mismatch")) {return { ok: false, reason: "device-limit-exceeded" };}
@@ -764,7 +783,7 @@ async function validateWithServer(key, fingerprintHash) {
   } catch (e) {
     _cb.record(false);
     persistCircuitBreaker();
-    console.warn("[SG SW] Server validate failed:", e.message);
+    console.warn("[SG SW] Server validate failed (network/exception):", e.message);
     return { ok: false, reason: "server-unreachable" };
   }
 }
@@ -823,10 +842,15 @@ async function checkRevocations() {
  * @returns {Promise<{ok:boolean, reason?:string, tier?:string, exp?:number}>}
  */
 async function verifyLicense(key, deviceId) {
+  console.log("[SG SW] verifyLicense called — key:", key ? key.slice(0, 8) + "..." : "null", "deviceId:", deviceId ? "present" : "missing");
   try {
-    if (!key) {return { ok: false, reason: "no-key" };}
+    if (!key) {
+      console.warn("[SG SW] verifyLicense: no key provided");
+      return { ok: false, reason: "no-key" };
+    }
 
     var fp = await SG_FINGERPRINT.getFingerprint();
+    console.log("[SG SW] Fingerprint:", fp ? fp.slice(0, 16) + "..." : "null");
     const nowSec = Math.floor(Date.now() / 1000);
 
     // ── Server-first validation ──
@@ -846,6 +870,7 @@ async function verifyLicense(key, deviceId) {
 
     // Server returned explicit error — honor it, do NOT fall back
     if (serverResult.reason && serverResult.reason !== "server-unreachable") {
+      console.warn("[SG SW] Server rejected license — reason:", serverResult.reason);
       if (serverResult.reason === "device-limit-exceeded") {
         await setState({ sg_device_limit_reason: serverResult.reason, sg_device_cooldown_days: 0 });
       }
@@ -853,8 +878,10 @@ async function verifyLicense(key, deviceId) {
     }
 
     // ── Offline fallback (server unreachable) ──
+    console.log("[SG SW] Server unreachable — attempting offline validation");
     var offlineResult = await SG_LICENSE.validate(key, fp);
     if (!offlineResult.ok) {
+      console.warn("[SG SW] Offline validation failed — reason:", offlineResult.reason);
       if (offlineResult.reason === "device-limit-exceeded") {
         await setState({ sg_device_limit_reason: offlineResult.reason, sg_device_cooldown_days: 0 });
       }
@@ -941,7 +968,8 @@ function ensureHeartbeatAlarm() {
 }
 
 // Initialize on install
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
+  console.log("[SG SW] onInstalled — reason:", details.reason, "previousVersion:", details.previousVersion || "none");
   // Migrate legacy device IDs to unified key on first run
   const legacy = await new Promise(r => chrome.storage.local.get({
     SG_deviceId: "",
@@ -968,6 +996,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // Initialize on browser startup
 chrome.runtime.onStartup.addListener(async () => {
+  console.log("[SG SW] onStartup — extension starting up");
   await restoreCircuitBreaker();
   await withAlarmLock(async () => {
     await clearAllAlarms();
@@ -975,6 +1004,7 @@ chrome.runtime.onStartup.addListener(async () => {
     ensureHeartbeatAlarm();
   });
   await flushTelegramQueue();
+  console.log("[SG SW] Startup complete — alarms initialized");
   const st     = await getState();
   const cached = await getValidToken();
   const nowSec = Math.floor(Date.now() / 1000);

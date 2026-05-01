@@ -170,12 +170,15 @@ function canVerify() {
 }
 
 async function verifyLicense(key) {
+  console.log("[SG Popup] verifyLicense called — key:", key ? key.slice(0, 8) + "..." : "null");
   try {
     const result = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "SG_VERIFY_LICENSE", key }, (res) => {
         if (chrome.runtime.lastError) {
+          console.error("[SG Popup] SW unreachable:", chrome.runtime.lastError.message);
           resolve({ ok: false, reason: "sw-unreachable" });
         } else {
+          console.log("[SG Popup] SW response:", res);
           resolve(res || { ok: false, reason: "no-response" });
         }
       });
@@ -188,6 +191,7 @@ async function verifyLicense(key) {
     }
     return result;
   } catch (e) {
+    console.error("[SG Popup] verifyLicense exception:", e);
     return { ok: false, reason: "validation-error" };
   }
 }
@@ -469,11 +473,13 @@ async function handleVerify() {
     return;
   }
 
+  console.log("[SG Popup] handleVerify — key:", key.slice(0, 8) + "...");
   await setStore({ [KEYS.USER_KEY]: key });
   setStatus(els.licenseStatus, "Verifying…", "info");
   setLoading(els.licenseStatus, true);
 
   const r = await verifyLicense(key);
+  console.log("[SG Popup] verifyLicense result:", r);
 
   setLoading(els.licenseStatus, false);
   if (r.ok) {
@@ -481,6 +487,7 @@ async function handleVerify() {
     els.licenseStatus.setAttribute("tabindex", "-1");
     els.licenseStatus.focus();
   } else {
+    console.error("[SG Popup] License verification failed:", r.reason);
     setStatus(els.licenseStatus, (r.reason || "error").replace(/-/g, " "), "error");
   }
   refreshLicenseStatusRow();
