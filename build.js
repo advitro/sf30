@@ -230,11 +230,13 @@ for (const pattern of COPY_PATTERNS) {
   copyGlob(pattern, SRC_DIR);
 }
 
-// Update manifest.json with contact URL
+// Update manifest.json with contact URL and server URL
 const manifestPath = path.join(DIST_DIR, "manifest.json");
 if (fs.existsSync(manifestPath)) {
   let manifest = fs.readFileSync(manifestPath, "utf-8");
   manifest = manifest.split("__SG_CONTACT_URL__").join(ENV_CONFIG.CONTACT_URL || "https://t.me/shift_grabber");
+  const serverUrl = ENV_CONFIG.SERVER_URL || "";
+  manifest = manifest.split("__SG_SERVER_URL__").join(serverUrl);
   fs.writeFileSync(manifestPath, manifest, "utf-8");
   console.log("📝 Updated manifest.json");
 }
