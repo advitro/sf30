@@ -67,6 +67,33 @@ const OBF_CONFIG = {
   unicodeEscapeSequence: false
 };
 
+// Service-worker-safe obfuscation config — bundles all shared files + SW into one file.
+// Aggressive features that inject `window` references or cause runtime crashes
+// in Chrome MV3 service workers are disabled:
+//   - selfDefending / debugProtection inject `window` fallbacks
+//   - controlFlowFlattening + deadCodeInjection can cause runtime errors
+//   - transformObjectKeys can break cross-file object interfaces
+//   - splitStrings with stringArray disabled causes decoder issues
+const OBF_CONFIG_SW = {
+  compact: true,
+  controlFlowFlattening: false,
+  deadCodeInjection: false,
+  debugProtection: false,
+  disableConsoleOutput: false,
+  identifierNamesGenerator: "mangled",
+  log: false,
+  numbersToExpressions: true,
+  renameGlobals: false,
+  rotateStringArray: false,
+  selfDefending: false,
+  shuffleStringArray: false,
+  splitStrings: false,
+  stringArray: false,
+  stringArrayThreshold: 0,
+  transformObjectKeys: false,
+  unicodeEscapeSequence: false
+};
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -206,19 +233,56 @@ fs.mkdirSync(DIST_DIR, { recursive: true });
 
 console.log("🏗️  Building Shift Grabber V9 — Production (Offline License)\n");
 
-// Obfuscate JS files
-// Service worker is processed with stringArray disabled so build-time string injection works reliably
-const SW_NO_STRING_ARRAY_CONFIG = { ...OBF_CONFIG, stringArray: false, stringArrayThreshold: 0 };
+// Service worker bundle: concatenate shared files + SW into one file.
+// This prevents mangled-name collisions and window-reference crashes that
+// occur when multiple independently-obfuscated files are loaded via
+// importScripts() into the same global scope.
+const SW_SHARED_FILES = [
+  "src/shared/constants.js",
+  "src/shared/crypto.js",
+  "src/shared/fingerprint.js",
+  "src/shared/circuit-breaker.js",
+  "src/shared/license-validator.js"
+];
+
+function buildServiceWorkerBundle() {
+  const parts = [];
+  for (const file of SW_SHARED_FILES) {
+    const srcPath = path.join(SRC_DIR, file);
+    if (!fs.existsSync(srcPath)) {
+      console.warn("⚠️  SW dependency not found:", file);
+      continue;
+    }
+    parts.push(preprocessSource(srcPath));
+  }
+
+  const swPath = path.join(SRC_DIR, "background/service-worker.js");
+  let swCode = preprocessSource(swPath);
+  // Remove importScripts calls — shared code is now bundled inline
+  swCode = swCode.replace(/importScripts\([^)]+\);?\s*\n?/g, "");
+  parts.push(swCode);
+
+  return parts.join("\n");
+}
+
+// Build and obfuscate the SW bundle first
+const swBundle = buildServiceWorkerBundle();
+const swBundleTemp = path.join(SRC_DIR, "background/service-worker.bundle.tmp");
+fs.writeFileSync(swBundleTemp, swBundle, "utf-8");
+obfuscateFile(swBundleTemp, path.join(DIST_DIR, "background/service-worker.js"), OBF_CONFIG_SW);
+fs.unlinkSync(swBundleTemp);
+
+// Obfuscate remaining JS files (content scripts, popup, shared files for content scripts)
 for (const pattern of OBFUSCATE_PATTERNS) {
+  if (pattern.includes("service-worker")) continue; // already bundled above
   const src = path.join(SRC_DIR, pattern);
   const dest = path.join(DIST_DIR, pattern);
   if (fs.existsSync(src)) {
-    const isServiceWorker = pattern.includes("service-worker");
     // Pre-process source to inject secrets/URLs before obfuscation
     const preprocessed = preprocessSource(src);
     const tempSrc = src + ".tmp";
     fs.writeFileSync(tempSrc, preprocessed, "utf-8");
-    obfuscateFile(tempSrc, dest, isServiceWorker ? SW_NO_STRING_ARRAY_CONFIG : null);
+    obfuscateFile(tempSrc, dest, null);
     fs.unlinkSync(tempSrc);
   } else {
     console.warn("⚠️  Not found:", pattern);

@@ -17,7 +17,7 @@
       OVERRIDE:        "sg_override",
       PAUSED:          "sg_paused",
       ACCESS_TOKEN:    "sg_access_token",
-      TOKEN_EXP:       "sg_token_exp",
+      TOKEN_EXP:       "sg_license_exp",
       NEXT_DUE:        "sg_next_due",
       BURST_REMAINING: "sg_burst_left",
       DATES:           "sg_dates",

@@ -38,7 +38,7 @@ describe("SG_CONSTS", () => {
     expect(k.OVERRIDE).toBe("sg_override");
     expect(k.PAUSED).toBe("sg_paused");
     expect(k.ACCESS_TOKEN).toBe("sg_access_token");
-    expect(k.TOKEN_EXP).toBe("sg_token_exp");
+    expect(k.TOKEN_EXP).toBe("sg_license_exp");
     expect(k.USER_KEY).toBe("sg_userKey");
     expect(k.DEVICE_ID).toBe("sg_device_id");
   });

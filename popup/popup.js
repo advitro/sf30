@@ -11,7 +11,7 @@ const KEYS = {
   PAUSED:          "sg_paused",
   USER_KEY:        "sg_userKey",
   ACCESS_TOKEN:    "sg_access_token",
-  TOKEN_EXP:       "sg_token_exp"
+  TOKEN_EXP:       "sg_license_exp"
 };
 
 const getStore = (keys) => new Promise((res) => chrome.storage.local.get(keys, res));
@@ -184,7 +184,7 @@ async function verifyLicense(key) {
       await setStore({ sg_tier: result.tier });
     }
     if (result.exp) {
-      await setStore({ sg_license_exp: result.exp });
+      await setStore({ [KEYS.TOKEN_EXP]: result.exp });
     }
     return result;
   } catch (e) {

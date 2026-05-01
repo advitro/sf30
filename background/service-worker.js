@@ -824,7 +824,7 @@ async function checkRevocations() {
  */
 async function verifyLicense(key, deviceId) {
   try {
-    if (!key || !deviceId) {return { ok: false, reason: "no-key" };}
+    if (!key) {return { ok: false, reason: "no-key" };}
 
     var fp = await SG_FINGERPRINT.getFingerprint();
     const nowSec = Math.floor(Date.now() / 1000);
