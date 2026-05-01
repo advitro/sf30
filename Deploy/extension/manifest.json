@@ -1,18 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "Shift Grabber V9 — Extension (Licensed)",
+  "name": "Shift Grabber — Licensed",
   "version": "2.1.0",
   "description": "Direct API shift grabber — polls 7-day window every 1s per tab, instant claim on detection. Burst reloads at 5-min marks, DOM backup, HUD, Telegram alerts. Protected by license.",
   "permissions": ["tabs", "storage", "scripting", "alarms"],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://api.telegram.org https://api.shiftgrabber.net"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://api.telegram.org https://project-qgqvr.vercel.app"
   },
   "host_permissions": [
     "https://atoz.amazon.work/*",
     "https://atoz-apps.amazon.work/*",
 
     "https://api.telegram.org/*",
-    "https://api.shiftgrabber.net/*"
+    "https://project-qgqvr.vercel.app/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js"
