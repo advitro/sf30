@@ -1,0 +1,260 @@
+#!/usr/bin/env node
+// SF30 V1.0 — Production Build Pipeline (Terser)
+// Usage: npm install && node build.js
+// Output: dist/ directory with minified, production-ready extension
+
+const fs = require("fs");
+const path = require("path");
+const Terser = require("terser");
+
+const SRC_DIR = path.resolve(__dirname);
+const DIST_DIR = path.resolve(__dirname, "dist");
+
+// JS files to minify (relative to project root)
+const JS_PATTERNS = [
+  "background/service-worker.js",
+  "src/content/main.js",
+  "src/content/api-layer.js",
+  "popup/popup.js",
+  "src/shared/constants.js",
+  "src/shared/crypto.js",
+  "src/shared/fingerprint.js",
+  "src/shared/circuit-breaker.js",
+  "src/shared/license-validator.js"
+];
+
+// Files to copy as-is
+const COPY_PATTERNS = [
+  "manifest.json",
+  "popup/index.html",
+  "popup/styles.css",
+  "icons/**",
+  "sounds/**"
+];
+
+// Terser config — compress + mangle, no environment-breaking transforms
+const TERSER_CONFIG = {
+  compress: {
+    drop_debugger: true,
+    passes: 2,
+    unused: true,
+    dead_code: true,
+    keep_fargs: false,
+    keep_fnames: false
+  },
+  mangle: {
+    properties: false // keep property names intact (cross-file compatibility)
+  },
+  format: {
+    comments: false
+  }
+};
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function copyFile(src, dest) {
+  ensureDir(path.dirname(dest));
+  fs.copyFileSync(src, dest);
+  console.log("📄 Copied:", path.relative(SRC_DIR, src));
+}
+
+function copyGlob(pattern, baseDir) {
+  const parts = pattern.split("/");
+  const recurse = (currentDir, remainingParts, targetDir) => {
+    if (remainingParts.length === 0) return;
+    const part = remainingParts[0];
+    const rest = remainingParts.slice(1);
+
+    if (part === "**") {
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path.join(currentDir, entry.name);
+        const destPath = path.join(targetDir, entry.name);
+        if (entry.isDirectory()) {
+          recurse(srcPath, rest, destPath);
+        } else if (rest.length === 0) {
+          copyFile(srcPath, destPath);
+        }
+      }
+    } else if (part.includes("*")) {
+      const regex = new RegExp("^" + part.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$");
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (regex.test(entry.name)) {
+          const srcPath = path.join(currentDir, entry.name);
+          const destPath = path.join(targetDir, entry.name);
+          if (entry.isDirectory() && rest.length > 0) {
+            recurse(srcPath, rest, destPath);
+          } else {
+            copyFile(srcPath, destPath);
+          }
+        }
+      }
+    } else {
+      const srcPath = path.join(currentDir, part);
+      const destPath = path.join(targetDir, part);
+      if (rest.length === 0) {
+        if (fs.existsSync(srcPath)) copyFile(srcPath, destPath);
+      } else {
+        recurse(srcPath, rest, destPath);
+      }
+    }
+  };
+  recurse(baseDir, parts, DIST_DIR);
+}
+
+async function minifyFile(srcPath, destPath) {
+  ensureDir(path.dirname(destPath));
+  const code = fs.readFileSync(srcPath, "utf-8");
+  const result = await Terser.minify(code, TERSER_CONFIG);
+  if (result.error) {
+    console.error("❌ Terser error:", result.error, "in", path.relative(SRC_DIR, srcPath));
+    process.exit(1);
+  }
+  fs.writeFileSync(destPath, result.code, "utf-8");
+  const originalSize = Buffer.byteLength(code, "utf-8");
+  const minifiedSize = Buffer.byteLength(result.code, "utf-8");
+  console.log(
+    "🔒 Minified:",
+    path.relative(SRC_DIR, srcPath),
+    `(${Math.round(originalSize / 1024)}KB → ${Math.round(minifiedSize / 1024)}KB)`
+  );
+}
+
+// Multi-environment config injection (simplified for offline-only builds)
+let ENV_CONFIG = { CONTACT_URL: "https://t.me/shift_grabber" };
+try {
+  const ENV = process.env.SG_ENV || "production";
+  const envModule = require("./config/environments");
+  if (envModule && envModule[ENV]) {
+    ENV_CONFIG = envModule[ENV];
+  }
+} catch (e) {
+  console.warn("⚠️  config/environments.js not found — using defaults for offline build.");
+}
+
+// HMAC key for Telegram credential encryption — must be provided
+const hmacKey = process.env.SG_HMAC_KEY;
+if (!hmacKey || hmacKey === "change-me-in-production") {
+  console.error("❌ SG_HMAC_KEY environment variable is required. Aborting build.");
+  process.exit(1);
+}
+
+// Load RSA public key for license validation
+const PUBLIC_KEY_PATH = path.join(__dirname, "keys", "public.jwk.json");
+let licensePublicKey = null;
+if (fs.existsSync(PUBLIC_KEY_PATH)) {
+  licensePublicKey = JSON.parse(fs.readFileSync(PUBLIC_KEY_PATH, "utf-8"));
+} else {
+  console.warn("⚠️  keys/public.jwk.json not found. Run 'node scripts/generate-rsa-keys.js' first.");
+  console.warn("   License validation will not work without a public key.");
+}
+
+// Randomize inter-script message secret
+const crypto = require("crypto");
+const msgSecret = "sg_" + crypto.randomBytes(16).toString("hex") + crypto.randomBytes(16).toString("hex");
+
+// Pre-process source files: replace placeholders before minification
+function preprocessSource(srcPath) {
+  let code = fs.readFileSync(srcPath, "utf-8");
+
+  // Replace message secret placeholder
+  code = code.split('"__SG_MSG_SECRET__"').join('"' + msgSecret + '"');
+
+  // Replace contact URL placeholder in ALL files
+  const contactUrl = (ENV_CONFIG && ENV_CONFIG.CONTACT_URL) || "https://t.me/shift_grabber";
+  code = code.split("__SG_CONTACT_URL__").join(contactUrl);
+
+  // Replace license public key placeholder in constants.js
+  if (srcPath.includes("constants")) {
+    if (licensePublicKey) {
+      code = code.split('"__SG_LICENSE_PUBLIC_KEY__"').join(JSON.stringify(licensePublicKey));
+    }
+  }
+
+  // Service worker: replace split-string HMAC placeholder with real key
+  if (srcPath.includes("service-worker")) {
+    code = code.replace(/\["__SG",\s*"_HMAC",\s*"_KEY",\s*"_PLACEHOLDER__"\]\.join\(""\)/g, '"' + hmacKey + '"');
+  }
+
+  return code;
+}
+
+// Main build
+(async function main() {
+  // Clean dist
+  if (fs.existsSync(DIST_DIR)) {
+    fs.rmSync(DIST_DIR, { recursive: true });
+  }
+  fs.mkdirSync(DIST_DIR, { recursive: true });
+
+  console.log("🏗️  Building SF30 V1.0 — Production (Terser Minification)\n");
+
+  // Minify JS files
+  for (const pattern of JS_PATTERNS) {
+    const src = path.join(SRC_DIR, pattern);
+    const dest = path.join(DIST_DIR, pattern);
+    if (fs.existsSync(src)) {
+      const preprocessed = preprocessSource(src);
+      const tempSrc = src + ".tmp";
+      fs.writeFileSync(tempSrc, preprocessed, "utf-8");
+      await minifyFile(tempSrc, dest);
+      fs.unlinkSync(tempSrc);
+    } else {
+      console.warn("⚠️  Not found:", pattern);
+    }
+  }
+
+  // Copy static files
+  for (const pattern of COPY_PATTERNS) {
+    copyGlob(pattern, SRC_DIR);
+  }
+
+  // Update manifest.json with contact URL
+  const manifestPath = path.join(DIST_DIR, "manifest.json");
+  if (fs.existsSync(manifestPath)) {
+    let manifest = fs.readFileSync(manifestPath, "utf-8");
+    manifest = manifest.split("__SG_CONTACT_URL__").join(ENV_CONFIG.CONTACT_URL || "https://t.me/shift_grabber");
+    fs.writeFileSync(manifestPath, manifest, "utf-8");
+    console.log("📝 Updated manifest.json");
+  }
+
+  // Post-minification safety check: ensure no HMAC placeholder remains in service worker
+  const swPath = path.join(DIST_DIR, "background/service-worker.js");
+  if (fs.existsSync(swPath)) {
+    let swCode = fs.readFileSync(swPath, "utf-8");
+    if (swCode.includes("__SG_HMAC_KEY_PLACEHOLDER__")) {
+      console.error("❌ HMAC placeholder still present in service worker after minification. Build aborted.");
+      process.exit(1);
+    }
+    console.log("🔑 Verified HMAC key injected into service worker");
+  }
+
+  console.log("🔀 Randomized message secret for inter-script validation");
+
+  // Sync dist/ to Deploy/extension/ for customer-ready package
+  const DEPLOY_EXT_DIR = path.resolve(__dirname, "Deploy/extension");
+  if (fs.existsSync(DEPLOY_EXT_DIR)) {
+    fs.rmSync(DEPLOY_EXT_DIR, { recursive: true });
+  }
+  function copyRecursive(src, dest) {
+    ensureDir(dest);
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        copyRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+  copyRecursive(DIST_DIR, DEPLOY_EXT_DIR);
+  console.log("📦 Synced dist/ → Deploy/extension/");
+
+  console.log("\n✅ SF30 V1.0 Build complete:", DIST_DIR);
+  console.log("📦 Next: run `npm run build:zip` or upload Deploy/extension/ to Chrome Web Store.");
+})();

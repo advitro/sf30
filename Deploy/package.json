@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node build.js",
     "build:zip": "node build.js && node zip.js",
+    "dev-build": "node scripts/dev-build.js",
     "lint": "eslint src/ background/ popup/ tests/",
     "lint:fix": "eslint src/ background/ popup/ tests/ --fix",
     "test": "jest",

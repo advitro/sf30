@@ -6,7 +6,16 @@ const path = require("path");
 const { execSync } = require("child_process");
 
 const distDir = path.resolve(__dirname, "dist");
-const outZip = path.resolve(__dirname, "shift-grabber-v9.zip");
+
+// Read version from package.json so the zip name always reflects the actual release
+let version = "0.0.0";
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf-8"));
+  version = pkg.version || "0.0.0";
+} catch (e) {
+  console.warn("⚠️  Could not read package.json version — using 0.0.0");
+}
+const outZip = path.resolve(__dirname, `shift-grabber-v${version}.zip`);
 
 if (!fs.existsSync(distDir)) {
   console.error("❌ dist/ directory not found. Run `npm run build` first.");

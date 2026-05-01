@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "SF30 V2.0",
+  "version": "2.0.0",
+  "description": "Stealth shift grabber for Amazon AtoZ — silent polling, instant claiming, zero detection.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "alarms",
+    "activeTab"
+  ],
+  "optional_permissions": [],
+  "host_permissions": [
+    "https://atoz.amazon.work/*",
+    "https://atoz-apps.amazon.work/*",
+    "https://api.telegram.org/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Shift Grabber Control",
+    "default_popup": "src/popup/index.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://api.telegram.org https://license.sf30.app; img-src 'self' data:; font-src 'self'; media-src 'self'; frame-src 'none'; base-uri 'self'; form-action 'none'"
+  }
+}

@@ -11,7 +11,7 @@ describe("SG_CONSTS", () => {
   });
 
   it("has required top-level sections", () => {
-    expect(self.SG_CONSTS.VERSION).toBe("V9");
+    expect(self.SG_CONSTS.VERSION).toBe("V1.0");
     expect(self.SG_CONSTS.KEYS).toBeDefined();
     expect(self.SG_CONSTS.TIMING).toBeDefined();
     expect(self.SG_CONSTS.URLS).toBeDefined();
@@ -22,10 +22,6 @@ describe("SG_CONSTS", () => {
     expect(self.SG_CONSTS.DEFAULTS).toBeDefined();
     expect(self.SG_CONSTS.MSG_SCHEMA).toBeDefined();
     expect(self.SG_CONSTS.STATES).toBeDefined();
-  });
-
-  it("has placeholder server URL (replaced at build)", () => {
-    expect(self.SG_CONSTS.URLS.SERVER).toBe("__SG_SERVER_URL__");
   });
 
   it("has placeholder contact URL (replaced at build)", () => {

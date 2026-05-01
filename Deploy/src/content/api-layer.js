@@ -3,7 +3,7 @@
 // Stealth: single claim attempt, poll jitter, CSRF cache, clean query filters
 
 (function () {
-  if (window["__sg_" + "api_v3"]) return;
+  if (window["__sg_" + "api_v3"]) {return;}
   window["__sg_" + "api_v3"] = true;
 
   var GQL = "https://atoz-apps.amazon.work/apis/ScheduleManagementService/graphql";
@@ -50,19 +50,19 @@
 
   function getCsrf(force) {
     var now = Date.now();
-    if (!force && cachedCsrf && (now - csrfTs) < 60000) return cachedCsrf;
+    if (!force && cachedCsrf && (now - csrfTs) < 60000) {return cachedCsrf;}
     try {
       var m = document.cookie.match(/anti-csrftoken-a2z=([^;]+)/);
       if (m) { cachedCsrf = decodeURIComponent(m[1]); csrfTs = now; return cachedCsrf; }
       var el = document.querySelector('meta[name="anti-csrftoken-a2z"]');
       if (el) { cachedCsrf = el.getAttribute('content'); csrfTs = now; return cachedCsrf; }
-    } catch (e) {}
+    } catch (e) { /* intentionally empty */ }
     return null;
   }
 
   // --- helpers ---
   function eid() {
-    if (cachedEid) return cachedEid;
+    if (cachedEid) {return cachedEid;}
     var pat = /aza-user-features-(\d+)-prod/;
     try {
       // 1. localStorage
@@ -76,13 +76,13 @@
       // 4. DOM meta tag
       var meta = document.querySelector('meta[name="employee-id"]');
       if (meta) { cachedEid = meta.getAttribute('content'); return cachedEid; }
-    } catch (e) {}
+    } catch (e) { /* intentionally empty */ }
     return null;
   }
 
   // Extract x-atoz-client-id from real page requests instead of hardcoding
   function sniffClientId() {
-    if (extractedClientId) return extractedClientId;
+    if (extractedClientId) {return extractedClientId;}
     try {
       var scripts = document.querySelectorAll('script');
       for (var i = 0; i < scripts.length; i++) {
@@ -92,7 +92,7 @@
       }
       // Fallback: try to read from any loaded JS that sets it globally
       if (window.__ATOZ_CLIENT_ID) { extractedClientId = window.__ATOZ_CLIENT_ID; return extractedClientId; }
-    } catch (e) {}
+    } catch (e) { /* intentionally empty */ }
     return "SCHEDULE_MANAGEMENT_SERVICE"; // last-resort fallback
   }
 
@@ -105,7 +105,7 @@
       "Referer": window.location.href
     };
     var t = getCsrf();
-    if (t) h["anti-csrftoken-a2z"] = t;
+    if (t) {h["anti-csrftoken-a2z"] = t;}
     return h;
   }
 
@@ -126,7 +126,7 @@
 
   function isTerminalError(data) {
     var errs = data && (data.errors || (data.data && data.data.errors));
-    if (!errs) return false;
+    if (!errs) {return false;}
     var s = JSON.stringify(errs).toLowerCase();
     return TERMINAL_STRINGS.some(function (t) { return s.indexOf(t) !== -1; });
   }
@@ -160,12 +160,12 @@
 
   // --- claim — single attempt only. Retries are the #1 bot detection signal. ---
   function fireClaim(id, oppId, shiftInfo) {
-    if (claimedIds[oppId]) return;
+    if (claimedIds[oppId]) {return;}
 
     // Blacklist check — skip dates user opted out of
     if (blacklistDates.length > 0 && shiftInfo) {
       var shiftDate = shiftInfo.start ? shiftInfo.start.split('T')[0] : null;
-      if (shiftDate && blacklistDates.indexOf(shiftDate) !== -1) return;
+      if (shiftDate && blacklistDates.indexOf(shiftDate) !== -1) {return;}
     }
 
     claimedIds[oppId] = true;
@@ -185,7 +185,7 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           // Shift is gone — don't retry, no notification
-          if (isTerminalError(data)) return;
+          if (isTerminalError(data)) {return;}
 
           // Report result to main.js (success or final failure)
           window.postMessage({
@@ -238,7 +238,7 @@
       console.log('[SG] ⚠️ RATE LIMITED (429) — backing off to ' + backoffMs + ' ms polls');
       window.postMessage({ sg: 1, type: 'SG_RATE_LIMITED', limited: true, secret: SG_CONSTS.MSG_SECRET }, '*');
       pollInterval = backoffMs;
-      if (errorRecoveryTimer) clearTimeout(errorRecoveryTimer);
+      if (errorRecoveryTimer) {clearTimeout(errorRecoveryTimer);}
       errorRecoveryTimer = setTimeout(function () {
         rateLimited = false;
         consecutiveErrors = 0;
@@ -305,7 +305,7 @@
                   duration: opp.shift.duration.value,
                   site: opp.shift.site.name
                 };
-              } catch (e) {}
+              } catch (e) { /* intentionally empty */ }
               fireClaim(id, opp.id, info);
             }
           }
@@ -322,7 +322,7 @@
   // Poisson distribution matches natural human browsing far better than uniform jitter.
   // Mean interval is configurable; actual delays cluster around the mean with long-tail variance.
   function startLoop() {
-    if (running) return;
+    if (running) {return;}
     // Only poll on actual schedule pages
     if (!window.location.pathname.includes("/shifts/schedule/find")) {
       console.log('[SG] Not on schedule page — polling inactive');
@@ -330,7 +330,7 @@
     }
     running = true;
     function loop() {
-      if (!running) return;
+      if (!running) {return;}
       injectDecoyInteraction();
       pollOnce().then(function () {
         var delay = poissonDelay(pollInterval);
@@ -347,7 +347,7 @@
 
   // --- messages from main.js ---
   window.addEventListener('message', function (e) {
-    if (e.source !== window || !e.data || !e.data.sg) return;
+    if (e.source !== window || !e.data || !e.data.sg) {return;}
     // Validate message secret to prevent cross-script spoofing
     if (e.data.secret !== SG_CONSTS.MSG_SECRET) {
       console.warn('[SG API] Rejected message with invalid secret');
@@ -365,10 +365,10 @@
       }
       startLoop();
     }
-    if (e.data.type === 'SG_STOP_POLLING') stopLoop();
+    if (e.data.type === 'SG_STOP_POLLING') {stopLoop();}
     if (e.data.type === 'SG_SET_SPEED') {
       baseInterval = e.data.interval || 1000;
-      if (!rateLimited) pollInterval = baseInterval;
+      if (!rateLimited) {pollInterval = baseInterval;}
     }
     if (e.data.type === 'SG_SET_BLACKLIST_DATES') {
       blacklistDates = e.data.blacklist || [];
@@ -380,8 +380,8 @@
   setInterval(function () {
     if (pollCount > 0) {
       var info = '[SG] API: ' + pollCount + ' polls/30s · ~' + pollInterval + 'ms ± 200 · eid=' + (cachedEid || 'none');
-      if (tabWindow) info += ' · window=' + tabWindow.start + '+7d';
-      if (blacklistDates.length > 0) info += ' · blacklist=' + blacklistDates.join(',');
+      if (tabWindow) {info += ' · window=' + tabWindow.start + '+7d';}
+      if (blacklistDates.length > 0) {info += ' · blacklist=' + blacklistDates.join(',');}
       console.log(info);
       pollCount = 0;
     }

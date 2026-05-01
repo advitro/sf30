@@ -446,6 +446,64 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .tier-badge.basic { color: var(--muted); border-color: var(--subtle); }
 .tier-badge.pro   { color: var(--blue);  border-color: var(--blue); }
 
+/* ── Fingerprint display (primary activation step) ── */
+.fingerprint-row {
+  background: linear-gradient(135deg, #1a1b26 0%, #1e1f2e 100%);
+  border: 1px solid var(--accent-500);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.fingerprint-row.hidden {
+  display: none;
+}
+.fingerprint-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent-400);
+  margin-bottom: 8px;
+}
+.fingerprint-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fingerprint-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  background: #0d0e15;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.btn.fp-copy {
+  padding: 8px 12px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.fingerprint-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* ── Onboarding section ── */
+#onboardingSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#onboardingSection.hidden {
+  display: none;
+}
+
 /* ── Footer ── */
 footer {
   text-align: center;

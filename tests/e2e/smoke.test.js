@@ -47,20 +47,20 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist");
     const el = document.getElementById("panelControls");
     return el && !el.hidden;
   });
-  if (!controlsVisible) throw new Error("Controls tab did not open.");
+  if (!controlsVisible) {throw new Error("Controls tab did not open.");}
   await page.click("#tabSettings");
   await page.waitForTimeout(200);
   const settingsVisible = await page.evaluate(() => {
     const el = document.getElementById("panelSettings");
     return el && !el.hidden;
   });
-  if (!settingsVisible) throw new Error("Settings tab did not open.");
+  if (!settingsVisible) {throw new Error("Settings tab did not open.");}
   console.log("[E2E] ✓ Tab switching works");
 
   // 3. Test license input
   await page.type("#licenseInput", "sg_test_12345678");
   const inputValue = await page.evaluate(() => document.getElementById("licenseInput").value);
-  if (inputValue !== "sg_test_12345678") throw new Error("License input failed.");
+  if (inputValue !== "sg_test_12345678") {throw new Error("License input failed.");}
   console.log("[E2E] ✓ License input works");
 
   // 4. Test service worker is alive (via extension messaging)
@@ -68,7 +68,7 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist");
     t => t.type() === "service_worker",
     { timeout: 5000 }
   );
-  if (!workerTarget) throw new Error("Service worker did not start.");
+  if (!workerTarget) {throw new Error("Service worker did not start.");}
   console.log("[E2E] ✓ Service worker alive");
 
   // 5. Test storage API works
@@ -79,7 +79,7 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist");
   const stored = await page.evaluate(() =>
     new Promise(resolve => chrome.storage.local.get("sg_e2e_test", resolve))
   );
-  if (stored.sg_e2e_test !== "hello") throw new Error("Storage API not working.");
+  if (stored.sg_e2e_test !== "hello") {throw new Error("Storage API not working.");}
   console.log("[E2E] ✓ Storage API works");
 
   console.log("\n[E2E] All smoke tests passed.\n");
@@ -89,7 +89,7 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist");
 async function getExtensionId(browser) {
   const targets = await browser.targets();
   const extTarget = targets.find(t => t.type() === "service_worker" && t.url().startsWith("chrome-extension://"));
-  if (!extTarget) throw new Error("Could not find extension service worker.");
+  if (!extTarget) {throw new Error("Could not find extension service worker.");}
   const url = new URL(extTarget.url());
   return url.hostname;
 }

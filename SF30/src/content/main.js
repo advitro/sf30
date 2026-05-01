@@ -1,13 +1,13 @@
 // ===== Content — HUD, keep-signed-in, shift grabbing, pause/override =====
 
 const CFG = {
-  CONFIRM_WAIT_MS:      120,
-  PER_SHIFT_STAGGER_MS: 100,
+  CONFIRM_WAIT_MS:      (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.TIMING.CONFIRM_WAIT_MS : 120),
+  PER_SHIFT_STAGGER_MS: (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.TIMING.PER_SHIFT_STAGGER_MS : 100),
   BEEP: true,
   LOG:  true
 };
 
-const K = {
+const K = (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.KEYS : {
   ENABLED:         "sg_enabled",
   OVERRIDE:        "sg_override",
   PAUSED:          "sg_paused",
@@ -15,11 +15,11 @@ const K = {
   BURST_REMAINING: "sg_burst_left",
   ACCESS_TOKEN:    "sg_access_token",
   TOKEN_EXP:       "sg_token_exp",
-  USER_KEY:        "SG_userKey",
+  USER_KEY:        "sg_userKey",
   BLACKLIST_DATES: "sg_blacklist_dates"
-};
+});
 
-const VERSION = "V9";
+const VERSION = (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.VERSION : "V1.0");
 
 
 let hudEl        = null;
@@ -116,7 +116,7 @@ function showToast(msg, bg = "#22c55e", ms = 4000) {
       d.style.animation = "sgToastOut 0.3s ease forwards";
       setTimeout(() => d.remove(), 350);
     }, ms);
-  } catch {}
+  } catch (e) { console.error("[SG] showToast failed:", e); }
 }
 
 // Inject toast animations once
@@ -138,7 +138,7 @@ function playAlert() {
     a.src = chrome.runtime.getURL("sounds/click.mp3");
     a.volume = 1.0;
     a.play().catch(() => {});
-  } catch {}
+  } catch (e) { console.error("[SG] playAlert failed:", e); }
 }
 
 function flashOverlay(color) {
@@ -153,7 +153,7 @@ function flashOverlay(color) {
     setTimeout(() => { ov.style.opacity = "0.6"; }, 10);
     setTimeout(() => { ov.style.opacity = "0"; }, 160);
     setTimeout(() => ov.remove(), 320);
-  } catch {}
+  } catch (e) { console.error("[SG] flashOverlay failed:", e); }
 }
 
 // --- HUD --------------------------------------------------------------------
@@ -514,7 +514,7 @@ function clickStayLoggedInIfPresent() {
         return true;
       }
     }
-  } catch {}
+  } catch (e) { console.error("[SG] clickStayLoggedIn failed:", e); }
   return false;
 }
 
@@ -568,7 +568,7 @@ async function tryToGrabShifts() {
         beep.src = chrome.runtime.getURL("sounds/click.mp3");
         beep.volume = 0.8;
         beep.play().catch(() => {});
-      } catch {}
+      } catch (e) { console.error("[SG] beep failed:", e); }
 
       await sleep(CFG.CONFIRM_WAIT_MS);
       const c = findConfirmButton();

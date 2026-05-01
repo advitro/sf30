@@ -106,7 +106,7 @@ app.post('/api/v2/activate', async (req, res) => {
 
     if (!record.activated_at) {
       const exp = daysFromNow(DEFAULT_DAYS);
-      await activateLicense(record.id, { activatedAt: now, expiresAt: exp });
+      await activateLicense(record.id, { activatedAt: now, expiresAt: exp, fingerprintHash });
       return res.json({ ok: true, tier: record.tier || 'basic', exp });
     }
 
@@ -187,11 +187,7 @@ app.get('/admin.html', (_req, res) => {
 });
 
 app.post('/api/admin/generate', requireAdminToken, async (req, res) => {
-  const { fingerprint, tier, days } = req.body || {};
-
-  if (!fingerprint || typeof fingerprint !== 'string') {
-    return res.status(400).json({ ok: false, error: 'Missing fingerprint' });
-  }
+  const { tier, days } = req.body || {};
 
   const key = generateLicenseKey();
   const now = nowSeconds();
@@ -200,7 +196,7 @@ app.post('/api/admin/generate', requireAdminToken, async (req, res) => {
   try {
     await createLicense({
       key,
-      fingerprintHash: fingerprint,
+      fingerprintHash: null,
       tier: tier || 'basic',
       createdAt: now,
       expiresAt,

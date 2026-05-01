@@ -28,8 +28,8 @@ function show(el) { el.classList.remove("hidden"); }
 function hide(el) { el.classList.add("hidden"); }
 
 function setLoading(el, isLoading) {
-  if (isLoading) el.classList.add("loading");
-  else el.classList.remove("loading");
+  if (isLoading) {el.classList.add("loading");}
+  else {el.classList.remove("loading");}
 }
 
 function setTierBadge(tier) {
@@ -150,7 +150,7 @@ async function getDeviceId() {
   const key = (typeof SG_CONSTS !== "undefined" ? SG_CONSTS.KEYS.DEVICE_ID : "sg_device_id");
   return new Promise((resolve) => {
     chrome.storage.local.get({ [key]: "" }, (res) => {
-      if (res[key]) return resolve(res[key]);
+      if (res[key]) {return resolve(res[key]);}
       const id = crypto.randomUUID();
       chrome.storage.local.set({ [key]: id }, () => resolve(id));
     });
@@ -164,7 +164,7 @@ const VERIFY_COOLDOWN_MS = 3000;
 
 function canVerify() {
   const now = Date.now();
-  if (now - _lastVerifyTs < VERIFY_COOLDOWN_MS) return false;
+  if (now - _lastVerifyTs < VERIFY_COOLDOWN_MS) {return false;}
   _lastVerifyTs = now;
   return true;
 }
@@ -515,10 +515,10 @@ async function exportUserData() {
 /* ── Event listeners ── */
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (!msg || msg.type !== "SG_REQUEST_TOKEN_REFRESH") return;
+  if (!msg || msg.type !== "SG_REQUEST_TOKEN_REFRESH") {return;}
   chrome.storage.local.get([KEYS.USER_KEY], async (st) => {
     const key = st[KEYS.USER_KEY];
-    if (!key) return;
+    if (!key) {return;}
     await verifyLicense(key);
     refreshLicenseStatusUI();
   });
@@ -612,7 +612,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* ── Dates ── */
   els.addDateBtn.addEventListener("click", async () => {
     const v = els.dateInput.value;
-    if (!v) return;
+    if (!v) {return;}
     const st = await getStore([KEYS.DATES]);
     const set = new Set(st[KEYS.DATES] || []);
     set.add(v);
@@ -622,7 +622,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   els.clearDatesBtn.addEventListener("click", async () => {
-    if (!confirm("Clear all selected dates?")) return;
+    if (!confirm("Clear all selected dates?")) {return;}
     await setStore({ [KEYS.DATES]: [] });
     renderDates([]);
   });
@@ -638,7 +638,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* ── Blacklist ── */
   els.addBlacklistDateBtn.addEventListener("click", async () => {
     const v = els.blacklistDateInput.value;
-    if (!v) return;
+    if (!v) {return;}
     const st = await getStore([KEYS.BLACKLIST_DATES]);
     const set = new Set(st[KEYS.BLACKLIST_DATES] || []);
     set.add(v);
@@ -649,7 +649,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   els.clearBlacklistDatesBtn.addEventListener("click", async () => {
-    if (!confirm("Clear all blacklist dates?")) return;
+    if (!confirm("Clear all blacklist dates?")) {return;}
     await setStore({ [KEYS.BLACKLIST_DATES]: [] });
     renderBlacklistDates([]);
   });
@@ -727,7 +727,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   els.exportDataBtn.addEventListener("click", exportUserData);
 
   els.deleteDataBtn.addEventListener("click", async () => {
-    if (!confirm("Permanently delete ALL data stored by Shift Grabber? This cannot be undone.")) return;
+    if (!confirm("Permanently delete ALL data stored by Shift Grabber? This cannot be undone.")) {return;}
     await new Promise((r) => chrome.storage.local.clear(r));
     alert("All data deleted. The extension will now reload.");
     window.close();

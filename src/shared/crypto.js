@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_CRYPTO) return;
+  if (global.SG_CRYPTO) {return;}
 
   // Derive an AES-GCM key from a passphrase (device fingerprint + static salt)
   async function deriveKey(passphrase) {
@@ -66,7 +66,7 @@
   async function verifyHmac(message, signature, secret) {
     var computed = await hmac(message, secret);
     // Constant-time comparison to prevent timing attacks
-    if (computed.length !== signature.length) return false;
+    if (computed.length !== signature.length) {return false;}
     var result = 0;
     for (var i = 0; i < computed.length; i++) {
       result |= computed.charCodeAt(i) ^ signature.charCodeAt(i);

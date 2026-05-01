@@ -59,9 +59,9 @@ async function initPostgres() {
       const rows = await sql`SELECT * FROM licenses WHERE key = ${key}`;
       return rows[0] || null;
     },
-    async activateLicense(id, { activatedAt, expiresAt }) {
+    async activateLicense(id, { activatedAt, expiresAt, fingerprintHash }) {
       await sql`
-        UPDATE licenses SET activated_at = ${activatedAt}, expires_at = ${expiresAt}
+        UPDATE licenses SET activated_at = ${activatedAt}, expires_at = ${expiresAt}, fingerprint_hash = ${fingerprintHash || null}
         WHERE id = ${id}
       `;
     },
@@ -118,7 +118,7 @@ async function initSQLite() {
       'INSERT INTO licenses (key, fingerprint_hash, tier, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, 0)'
     ),
     findByKey: db.prepare('SELECT * FROM licenses WHERE key = ?'),
-    updateActivation: db.prepare('UPDATE licenses SET activated_at = ?, expires_at = ? WHERE id = ?'),
+    updateActivation: db.prepare('UPDATE licenses SET activated_at = ?, expires_at = ?, fingerprint_hash = ? WHERE id = ?'),
     revoke: db.prepare('UPDATE licenses SET revoked = 1 WHERE key = ?'),
     delete: db.prepare('DELETE FROM licenses WHERE key = ?'),
     listRevoked: db.prepare("SELECT key FROM licenses WHERE revoked = 1 ORDER BY key"),
@@ -131,8 +131,8 @@ async function initSQLite() {
     createLicense: ({ key, fingerprintHash, tier, createdAt, expiresAt }) =>
       stmts.insert.run(key, fingerprintHash || null, tier || 'basic', createdAt, expiresAt),
     getLicense: (key) => stmts.findByKey.get(key) || null,
-    activateLicense: (id, { activatedAt, expiresAt }) =>
-      stmts.updateActivation.run(activatedAt, expiresAt, id),
+    activateLicense: (id, { activatedAt, expiresAt, fingerprintHash }) =>
+      stmts.updateActivation.run(activatedAt, expiresAt, fingerprintHash || null, id),
     revokeLicense: (key) => stmts.revoke.run(key),
     deleteLicense: (key) => stmts.delete.run(key),
     listRevoked: () => stmts.listRevoked.all(),

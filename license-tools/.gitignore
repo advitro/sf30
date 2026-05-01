@@ -1,0 +1,6 @@
+# Never commit the private key
+private.pem
+
+# Ignore any test keys or temp files
+*.key.test
+*.tmp

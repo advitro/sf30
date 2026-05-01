@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_LICENSE) return;
+  if (global.SG_LICENSE) {return;}
 
   // Embedded at build time from keys/public.jwk.json
   var PUBLIC_KEY_JWK = typeof __SG_LICENSE_PUBLIC_KEY__ !== "undefined"
@@ -15,8 +15,8 @@
   var _importedKey = null;
 
   async function getPublicKey() {
-    if (_importedKey) return _importedKey;
-    if (!PUBLIC_KEY_JWK) throw new Error("License public key not configured");
+    if (_importedKey) {return _importedKey;}
+    if (!PUBLIC_KEY_JWK) {throw new Error("License public key not configured");}
     _importedKey = await crypto.subtle.importKey(
       "jwk",
       PUBLIC_KEY_JWK,
@@ -30,7 +30,7 @@
   // base64url decode
   function b64urlDecode(str) {
     str += new Array(5 - (str.length % 4)).join("=");
-    str = str.replace(/\-/g, "+").replace(/\_/g, "/");
+    str = str.replace(/-/g, "+").replace(/_/g, "/");
     return new Uint8Array(
       atob(str).split("").map(function (c) { return c.charCodeAt(0); })
     );

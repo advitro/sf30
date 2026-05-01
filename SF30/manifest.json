@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "SF30 V1.0",
-  "version": "1.0.0",
+  "name": "SF30 V2.0",
+  "version": "2.0.0",
   "description": "Direct API shift grabber — polls 7-day window every 1s per tab, instant claim on detection. Burst reloads at 5-min marks, DOM backup, HUD, Telegram alerts. Protected by license.",
   "permissions": ["tabs", "storage", "scripting", "alarms"],
   "content_security_policy": {

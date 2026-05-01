@@ -9,9 +9,7 @@ const KEYS = {
   BLACKLIST_DATES: "sg_blacklist_dates",
   OVERRIDE:        "sg_override",
   PAUSED:          "sg_paused",
-  USER_KEY:        "sg_userKey",
-  ACCESS_TOKEN:    "sg_access_token",
-  TOKEN_EXP:       "sg_token_exp"
+  USER_KEY:        "sg_userKey"
 };
 
 const getStore = (keys) => new Promise((res) => chrome.storage.local.get(keys, res));
@@ -19,9 +17,12 @@ const setStore = (obj)  => new Promise((res) => chrome.storage.local.set(obj, re
 
 /* ── UI helpers ── */
 
+let _lastStatusSetTs = 0;
+
 function setStatus(el, text, type) {
   el.textContent = text;
   el.className = "status-text" + (type ? " " + type : "");
+  _lastStatusSetTs = Date.now();
 }
 
 function show(el) { el.classList.remove("hidden"); }
@@ -55,6 +56,15 @@ const els = {
   toggleDesc:            document.getElementById("toggleDesc"),
   licenseStatusRow:      document.getElementById("licenseStatusRow"),
   tierDetail:            document.getElementById("tierDetail"),
+
+  /* Onboarding */
+  onboardingSection:     document.getElementById("onboardingSection"),
+  manageLicenseBtn:      document.getElementById("manageLicenseBtn"),
+  licenseSettingsStatus: document.getElementById("licenseSettingsStatus"),
+
+  /* Fingerprint */
+  fingerprintValue:      document.getElementById("fingerprintValue"),
+  copyFpBtn:             document.getElementById("copyFpBtn"),
 
   /* Tabs */
   tabShifts:             document.getElementById("tabShifts"),
@@ -144,6 +154,19 @@ function currentTabIndex() {
   return TABS.findIndex(t => t.btn.classList.contains("active"));
 }
 
+/* ── Device Fingerprint ── */
+
+async function getAndShowFingerprint() {
+  try {
+    const fp = await SG_FINGERPRINT.getFingerprint();
+    els.fingerprintValue.textContent = fp;
+    return fp;
+  } catch (e) {
+    els.fingerprintValue.textContent = " unavailable";
+    return null;
+  }
+}
+
 /* ── Device ID ── */
 
 async function getDeviceId() {
@@ -228,7 +251,7 @@ async function loadTelegramInputs() {
     // unless user re-enters them. This is intentional for security.
     // The toggle and status still reflect whether credentials exist.
   } catch (e) {
-    // ignore
+    console.warn("[SG] loadTelegramInputs failed:", e);
   }
 }
 
@@ -247,13 +270,55 @@ function updateTelegramUI(configured) {
   }
 }
 
+/* ── Human-friendly error messages ── */
+
+const ERROR_MESSAGES = {
+  "no-key": "Enter your license key above",
+  "invalid-key-format": "Invalid key format — make sure you copied the entire key",
+  "invalid-signature": "Invalid key — this key was tampered with or forged",
+  "incomplete-key": "Incomplete key — contact support",
+  "expired": "Your license has expired — renew to continue",
+  "clock-tamper-detected": "System clock tampering detected — fix your clock and try again",
+  "device-limit-exceeded": "This key is locked to another device — send your fingerprint to get a new key",
+  "key-not-device-bound": "This key is not bound to your device — send your fingerprint to get a bound key",
+  "trial-expired": "Your 24-hour trial has expired — send your fingerprint to get a full key",
+  "trial-unavailable": "Trial mode unavailable — contact support",
+  "validation-error": "Validation error — try again or contact support",
+  "sw-unreachable": "Extension background process unreachable — reload the extension",
+  "no-response": "No response from extension — try again"
+};
+
+function getFriendlyError(reason) {
+  return ERROR_MESSAGES[reason] || (reason ? reason.replace(/-/g, " ") : "Unknown error");
+}
+
+/* ── Error telemetry (local only, no server) ── */
+
+async function logError(context, reason, details) {
+  try {
+    const stored = await getStore({ sg_error_log: [] });
+    const log = stored.sg_error_log || [];
+    log.push({
+      ts: new Date().toISOString(),
+      context: context,
+      reason: reason,
+      details: details || ""
+    });
+    // Keep last 50 errors
+    while (log.length > 50) log.shift();
+    await setStore({ sg_error_log: log });
+  } catch (e) {
+    // Telemetry failure is non-critical
+  }
+}
+
 /* ── License Status UI ── */
 
 async function refreshLicenseStatusRow() {
-  const st = await getStore([KEYS.USER_KEY, KEYS.ACCESS_TOKEN, KEYS.TOKEN_EXP, "sg_tier", "sg_device_limit_reason", "sg_device_cooldown_days"]);
+  const st = await getStore([KEYS.USER_KEY, "sg_tier", "sg_license_exp", "sg_device_limit_reason", "sg_device_cooldown_days"]);
   const key = st[KEYS.USER_KEY];
   const tier = st.sg_tier || "basic";
-  const exp = st[KEYS.TOKEN_EXP] || 0;
+  const exp = st.sg_license_exp || 0;
   const now = Math.floor(Date.now() / 1000);
   const deviceLimitReason = st.sg_device_limit_reason || null;
   const deviceCooldownDays = st.sg_device_cooldown_days || 0;
@@ -261,15 +326,15 @@ async function refreshLicenseStatusRow() {
   setTierBadge(tier);
 
   if (!key) {
-    setStatus(els.licenseStatusRow, "Enter a license key to activate.", "error");
+    setStatus(els.licenseStatusRow, "Step 1: Copy your fingerprint above and send it to receive a key", "error");
     els.tierDetail.textContent = "";
     updateToggleDesc(false, false, false);
     return;
   }
 
   if (deviceLimitReason === "device-limit-exceeded") {
-    setStatus(els.licenseStatusRow, "Device Limit Exceeded", "error");
-    els.tierDetail.textContent = `This key is active on another device. Transfer available in ${deviceCooldownDays} day${deviceCooldownDays === 1 ? "" : "s"}.`;
+    setStatus(els.licenseStatusRow, getFriendlyError("device-limit-exceeded"), "error");
+    els.tierDetail.textContent = `This key is locked to another device. Send your fingerprint to get a new key.`;
     updateToggleDesc(false, true, false);
     return;
   }
@@ -287,6 +352,7 @@ async function refreshLicenseStatusRow() {
 
   const enabledSt = await getStore([KEYS.ENABLED]);
   updateToggleDesc(!!enabledSt[KEYS.ENABLED], true, isValid);
+  updateOnboardingVisibility();
 }
 
 function updateToggleDesc(isEnabled, hasKey, isValid) {
@@ -303,17 +369,40 @@ function updateToggleDesc(isEnabled, hasKey, isValid) {
   }
 }
 
+/* ── Onboarding visibility ── */
+
+function updateOnboardingVisibility() {
+  chrome.storage.local.get({ sg_license_exp: 0, sg_tier: "" }, (res) => {
+    const now = Math.floor(Date.now() / 1000);
+    const licensed = res.sg_license_exp && res.sg_license_exp > now;
+    const tier = res.sg_tier || "basic";
+    if (licensed) {
+      hide(els.onboardingSection);
+      show(els.manageLicenseBtn);
+      els.manageLicenseBtn.textContent = "Manage License";
+      const days = Math.ceil((res.sg_license_exp - now) / 86400);
+      els.licenseSettingsStatus.textContent = `${tier === "pro" ? "Pro Plan" : "Basic Plan"} · Expires in ${days} day${days === 1 ? "" : "s"}`;
+    } else {
+      show(els.onboardingSection);
+      hide(els.manageLicenseBtn);
+      els.licenseSettingsStatus.textContent = "No active license — enter your key above";
+    }
+  });
+}
+
 /* ── License status ── */
 
 async function refreshLicenseStatusUI() {
-  const st = await getStore([KEYS.USER_KEY, KEYS.ACCESS_TOKEN, KEYS.TOKEN_EXP]);
+  // Don't overwrite status messages set by user actions within the last 6s
+  if (Date.now() - _lastStatusSetTs < 6000) return;
+
+  const st = await getStore([KEYS.USER_KEY, "sg_license_exp"]);
   const key = st[KEYS.USER_KEY];
-  const token = st[KEYS.ACCESS_TOKEN];
-  const exp = st[KEYS.TOKEN_EXP];
+  const exp = st.sg_license_exp;
   const now = Math.floor(Date.now() / 1000);
 
   if (!key) {
-    setStatus(els.licenseStatus, "Enter key and click Verify", "error");
+    setStatus(els.licenseStatus, "Step 1: Copy your fingerprint and send it to receive a key", "error");
     return;
   }
   if (exp && exp > now) {
@@ -326,10 +415,10 @@ async function refreshLicenseStatusUI() {
 /* ── Status badge ── */
 
 async function updateStatusBadge() {
-  const st = await getStore([KEYS.ENABLED, KEYS.PAUSED, KEYS.OVERRIDE, KEYS.TOKEN_EXP]);
+  const st = await getStore([KEYS.ENABLED, KEYS.PAUSED, KEYS.OVERRIDE, "sg_license_exp"]);
   const badge = els.statusBadge;
   const nowSec = Math.floor(Date.now() / 1000);
-  const hasToken = st[KEYS.TOKEN_EXP] && st[KEYS.TOKEN_EXP] > nowSec;
+  const hasToken = st.sg_license_exp && st.sg_license_exp > nowSec;
 
   badge.className = "badge";
   if (!st[KEYS.ENABLED]) {
@@ -429,18 +518,22 @@ async function handleMasterToggle(checked) {
     els.masterToggle.disabled = false;
 
     if (!r.ok) {
-      setStatus(els.licenseStatus, (r.reason || "error").replace(/-/g, " "), "error");
+      setStatus(els.licenseStatus, getFriendlyError(r.reason), "error");
+      logError("license-toggle", r.reason, key.substring(0, 20));
       els.masterToggle.checked = false;
       refreshLicenseStatusRow();
       return;
     }
 
-    setStatus(els.licenseStatus, "License Active — Shift Grabber ON", "success");
+    setStatus(els.licenseStatus, r.trial ? `Trial Active · ${r.hoursLeft}h left — Shift Grabber ON` : "License Active — Shift Grabber ON", "success");
     els.licenseStatus.setAttribute("tabindex", "-1");
     els.licenseStatus.focus();
     await setStore({ [KEYS.ENABLED]: true });
     els.masterToggle.checked = true;
     chrome.runtime.sendMessage({ type: "SG_SET_ENABLED", value: true }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn("[SG Popup] SET_ENABLED error:", chrome.runtime.lastError.message);
+      }
       chrome.runtime.sendMessage({ type: "SG_POKE_SCHEDULE" });
     });
     updateStatusBadge();
@@ -477,13 +570,15 @@ async function handleVerify() {
 
   setLoading(els.licenseStatus, false);
   if (r.ok) {
-    setStatus(els.licenseStatus, "License Active", "success");
+    setStatus(els.licenseStatus, r.trial ? `Trial Active · ${r.hoursLeft}h remaining` : "License Active", "success");
     els.licenseStatus.setAttribute("tabindex", "-1");
     els.licenseStatus.focus();
   } else {
-    setStatus(els.licenseStatus, (r.reason || "error").replace(/-/g, " "), "error");
+    setStatus(els.licenseStatus, getFriendlyError(r.reason), "error");
+    logError("license-verify", r.reason, key.substring(0, 20));
   }
   refreshLicenseStatusRow();
+  updateOnboardingVisibility();
 }
 
 /* ── GDPR Export ── */
@@ -560,16 +655,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateStatusBadge();
   checkTelegramConfigured();
   loadTelegramInputs();
+  updateOnboardingVisibility();
+
+  // Always show fingerprint — it's required before purchase
+  getAndShowFingerprint();
 
   // Re-validate license on popup open if token expires within 5 min
   const nowSec = Math.floor(Date.now() / 1000);
-  if (key && (!st[KEYS.TOKEN_EXP] || st[KEYS.TOKEN_EXP] - nowSec < 300)) {
+  if (key && (!st.sg_license_exp || st.sg_license_exp - nowSec < 300)) {
     verifyLicense(key).then(() => {
       refreshLicenseStatusUI();
       refreshLicenseStatusRow();
       updateStatusBadge();
       checkTelegramConfigured();
       loadTelegramInputs();
+      updateOnboardingVisibility();
     });
   }
 
@@ -590,6 +690,34 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   /* ── Verify button ── */
   els.verifyBtn.addEventListener("click", handleVerify);
+
+  /* ── Manage license toggle ── */
+  els.manageLicenseBtn.addEventListener("click", () => {
+    els.onboardingSection.classList.toggle("hidden");
+    els.manageLicenseBtn.textContent =
+      els.onboardingSection.classList.contains("hidden") ? "Manage License" : "Hide License";
+  });
+
+  /* ── Copy fingerprint button ── */
+  els.copyFpBtn.addEventListener("click", async () => {
+    const fp = els.fingerprintValue.textContent;
+    if (!fp || fp === "—") return;
+    try {
+      await navigator.clipboard.writeText(fp);
+      els.copyFpBtn.textContent = "Copied!";
+      setTimeout(() => { els.copyFpBtn.textContent = "Copy"; }, 1500);
+    } catch (e) {
+      // Fallback for older browsers
+      const ta = document.createElement("textarea");
+      ta.value = fp;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      els.copyFpBtn.textContent = "Copied!";
+      setTimeout(() => { els.copyFpBtn.textContent = "Copy"; }, 1500);
+    }
+  });
 
   /* ── Enter in license input = verify + enable (zero-friction) ── */
   els.licenseInput.addEventListener("keydown", (e) => {

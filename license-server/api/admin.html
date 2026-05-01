@@ -157,11 +157,6 @@
         <input id="apiToken" type="password" placeholder="Paste your API token here" autocomplete="off" spellcheck="false">
       </div>
 
-      <div class="field">
-        <label for="fingerprint">Customer Fingerprint</label>
-        <input id="fingerprint" type="text" placeholder="Paste fingerprint hash here" autocomplete="off" spellcheck="false">
-      </div>
-
       <div class="row">
         <div class="field">
           <label for="tier">Tier</label>
@@ -190,7 +185,6 @@
 
   <script>
     const apiTokenInput = document.getElementById('apiToken');
-    const fingerprintInput = document.getElementById('fingerprint');
     const tierSelect = document.getElementById('tier');
     const daysInput = document.getElementById('days');
     const generateBtn = document.getElementById('generateBtn');
@@ -215,17 +209,11 @@
     async function generateKey() {
       hideError();
       const apiToken = apiTokenInput.value.trim();
-      const fingerprint = fingerprintInput.value.trim();
       const tier = tierSelect.value;
       const days = parseInt(daysInput.value, 10);
 
       if (!apiToken) {
         showError('Please enter your admin API token');
-        return;
-      }
-
-      if (!fingerprint) {
-        showError('Please enter the customer fingerprint hash');
         return;
       }
 
@@ -239,7 +227,7 @@
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiToken}`
           },
-          body: JSON.stringify({ fingerprint, tier, days }),
+          body: JSON.stringify({ tier, days }),
         });
 
         const data = await response.json();

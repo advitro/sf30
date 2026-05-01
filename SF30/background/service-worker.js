@@ -1,9 +1,8 @@
-// service-worker.js — SF30 V1.0 background scheduler
+// service-worker.js — SF30 V2.0 background scheduler
 // Uses chrome.alarms for timing and only runs when a valid local license exists.
 importScripts("../src/shared/constants.js");
 importScripts("../src/shared/crypto.js");
 importScripts("../src/shared/fingerprint.js");
-importScripts("../src/shared/circuit-breaker.js");
 importScripts("../src/shared/license-validator.js");
 
 const C = self.SG_CONSTS;
@@ -16,48 +15,115 @@ const SG_CRYPTO = self.SG_CRYPTO;
 const SG_FINGERPRINT = self.SG_FINGERPRINT;
 const SG_LICENSE = self.SG_LICENSE;
 
-// HMAC verification key — injected at build time via string literal replacement
-// Server must sign responses with the same key. Rotate monthly.
-// Circuit breaker — extracted to shared module for testability
-var _cb = SG_CIRCUIT_BREAKER.createCircuitBreaker(3, 300000, function () {
-  persistCircuitBreaker();
-  console.log("[SG SW] Circuit breaker half-open — retrying server");
-});
-
-// Persist circuit breaker to storage so it survives SW restarts
-async function persistCircuitBreaker() {
-  var s = _cb.getState();
-  await setState({ sg_cb_failures: s.failures, sg_cb_open: s.open, sg_cb_last: s.lastFailure });
-}
-async function restoreCircuitBreaker() {
-  const st = await getState();
-  _cb.setState({
-    failures: st.sg_cb_failures || 0,
-    open: st.sg_cb_open || false,
-    lastFailure: st.sg_cb_last || 0
-  });
-}
-
 // Kill switch state
 let killSwitchActive = false;
 
-// In-memory token cache — decrypted token lives only in SW RAM
-let _memToken = null;
-let _memTokenExp = 0;
+// ── Bundle Integrity Verifier ──
+// Loads dist/src/shared/integrity.json (generated and HMAC-signed at build time),
+// verifies the manifest signature using the build-time HMAC key embedded here,
+// then re-hashes every shipped JS file and compares to the manifest.
+// If anything mismatches → kill switch flips and license validation always fails.
+// Result is cached for the SW lifetime to keep the hot path fast.
+const SG_INTEGRITY_HMAC_KEY = "__SG_HMAC_KEY__";
+let _integrityVerified = null; // null = not yet checked, true = ok, false = tampered
 
-/** Load decrypted token from storage, with in-memory caching. */
-async function getValidToken() {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const st = await getState();
-  const exp = st.sg_license_exp || 0;
-  if (exp > nowSec + 60) {
-    return { token: "offline", exp: exp };
+async function verifyBundleIntegrity() {
+  if (_integrityVerified !== null) return _integrityVerified;
+  // Debug build with no key injected — skip the check (dev only)
+  if (SG_INTEGRITY_HMAC_KEY === "__SG_HMAC_KEY__") {
+    _integrityVerified = true;
+    return true;
   }
-  return null;
+  try {
+    const url = chrome.runtime.getURL("src/shared/integrity.json");
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.error("[SG SW] integrity.json missing or unreadable");
+      _integrityVerified = false;
+      return false;
+    }
+    const block = await resp.json();
+    if (!block || !block.manifest || !block.signature) {
+      console.error("[SG SW] integrity.json malformed");
+      _integrityVerified = false;
+      return false;
+    }
+    // Verify HMAC signature on the manifest body
+    const manifestJson = JSON.stringify(block.manifest);
+    const sigOk = await SG_CRYPTO.verifyHmac(manifestJson, block.signature, SG_INTEGRITY_HMAC_KEY);
+    if (!sigOk) {
+      console.error("[SG SW] integrity manifest signature mismatch — tamper detected");
+      _integrityVerified = false;
+      return false;
+    }
+    // Re-hash each file and compare against the manifest
+    for (const filePath in block.manifest) {
+      const fileUrl = chrome.runtime.getURL(filePath);
+      const fileResp = await fetch(fileUrl);
+      if (!fileResp.ok) {
+        // File listed in manifest but missing on disk = tamper
+        console.error("[SG SW] integrity: file missing", filePath);
+        _integrityVerified = false;
+        return false;
+      }
+      const buf = await fileResp.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+      if (hashHex !== block.manifest[filePath]) {
+        console.error("[SG SW] integrity: file tampered", filePath);
+        _integrityVerified = false;
+        return false;
+      }
+    }
+    _integrityVerified = true;
+    return true;
+  } catch (e) {
+    console.error("[SG SW] integrity check error:", e);
+    _integrityVerified = false;
+    return false;
+  }
 }
 
-function invalidateTokenCache() {
-  // No-op in offline mode
+/** Load valid token from storage.
+ *  Verifies bundle integrity, HMAC signature on stored state, and devtools/debugger absence.
+ *  Three layers of tamper detection before returning a usable token. */
+async function getValidToken() {
+  // Layer 1: Bundle integrity — has any shipped file been edited post-build?
+  const integrityOk = await verifyBundleIntegrity();
+  if (!integrityOk) return null;
+
+  // Layer 2: Anti-debug — is a debugger likely attached right now?
+  if (SG_LICENSE && SG_LICENSE.isDebuggerLikelyOpen && SG_LICENSE.isDebuggerLikelyOpen()) {
+    console.warn("[SG SW] Debugger detected — refusing to issue token");
+    return null;
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const st = await new Promise(r => chrome.storage.local.get({
+    sg_license_exp: 0,
+    sg_tier: "",
+    sg_userKey: "",
+    sg_device_fp: "",
+    sg_license_state_sig: ""
+  }, r));
+  const exp = st.sg_license_exp || 0;
+  if (exp <= nowSec + 60) return null;
+
+  // HMAC signature verification — prevents storage poisoning
+  if (SG_LICENSE && SG_LICENSE.verifyStateSignature) {
+    const sigOk = await SG_LICENSE.verifyStateSignature({
+      exp: exp,
+      tier: st.sg_tier,
+      userKey: st.sg_userKey,
+      fp: st.sg_device_fp
+    }, st.sg_license_state_sig);
+    if (!sigOk) {
+      console.warn("[SG SW] License state signature invalid — storage may be tampered");
+      return null;
+    }
+  }
+  return { token: "offline", exp: exp };
 }
 
 /**
@@ -442,22 +508,57 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+/**
+ * Validates that a message sender is trusted (from this extension).
+ * In some Chrome versions popup messages arrive without sender.id,
+ * so we also accept matching chrome-extension:// URLs.
+ */
+function isTrustedSender(sender) {
+  if (!sender) return false;
+  if (sender.id === chrome.runtime.id) return true;
+  if (!sender.id && sender.url &&
+      sender.url.startsWith("chrome-extension://" + chrome.runtime.id + "/")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Safely call sendResponse, swallowing any errors (e.g. port already closed).
+ */
+function safeSendResponse(sendResponse, payload) {
+  try {
+    if (typeof sendResponse === "function") {
+      sendResponse(payload);
+    }
+  } catch (e) {
+    console.error("[SG SW] sendResponse failed:", e);
+  }
+}
+
 // Handle messages from popup / content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
+  if (!msg || !msg.type) {
+    safeSendResponse(sendResponse, { ok: false, reason: "missing-message" });
+    return true;
+  }
   // Security: validate sender is from this extension only
-  if (!sender || sender.id !== chrome.runtime.id) {
-    console.warn("[SG SW] Blocked message from untrusted sender:", sender?.id);
-    return;
+  if (!isTrustedSender(sender)) {
+    console.warn("[SG SW] Blocked message from untrusted sender:", sender);
+    safeSendResponse(sendResponse, { ok: false, reason: "untrusted-sender" });
+    return true;
   }
   // Schema validation
   const validation = validateMessage(msg);
   if (!validation.valid) {
     console.warn("[SG SW] Invalid message schema:", validation.reason, msg.type);
-    sendResponse && sendResponse({ ok: false, reason: validation.reason });
-    return;
+    safeSendResponse(sendResponse, { ok: false, reason: validation.reason });
+    return true;
   }
-  handleMessage(msg, sender, sendResponse);
+  handleMessage(msg, sender, sendResponse).catch((err) => {
+    console.error("[SG SW] Unhandled error in handleMessage:", err);
+    safeSendResponse(sendResponse, { ok: false, reason: "sw-error" });
+  });
   return true; // keeps message channel open for async response
 });
 
@@ -470,11 +571,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  */
 async function handleMessage(msg, sender, sendResponse) {
   if (msg.type === "SG_VERIFY_LICENSE") {
+    console.log("[SG SW] SG_VERIFY_LICENSE start");
     const key = msg.key;
-    const data = await new Promise(r => chrome.storage.local.get({ [K.DEVICE_ID]: "" }, r));
-    const result = await verifyLicense(key, data[K.DEVICE_ID]);
+    const result = await verifyLicense(key);
+    console.log("[SG SW] SG_VERIFY_LICENSE result:", result.ok, result.reason || "-");
     if (result.ok) {
-      chrome.runtime.sendMessage({ type: "SG_LICENSE_VERIFIED", value: true });
       await withAlarmLock(async () => {
         await clearAllAlarms();
         const st = await getState();
@@ -484,11 +585,10 @@ async function handleMessage(msg, sender, sendResponse) {
         }
       });
     } else {
-      invalidateTokenCache();
       await setState({ [K.ACCESS_TOKEN]: null, [K.TOKEN_EXP]: 0, sg_subscription_status: "expired" });
-      chrome.runtime.sendMessage({ type: "SG_LICENSE_VERIFIED", value: false });
     }
-    sendResponse && sendResponse(result);
+    safeSendResponse(sendResponse, result);
+    console.log("[SG SW] SG_VERIFY_LICENSE responded");
     return;
   }
 
@@ -509,7 +609,8 @@ async function handleMessage(msg, sender, sendResponse) {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
     });
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_SET_ENABLED") {
@@ -530,7 +631,8 @@ async function handleMessage(msg, sender, sendResponse) {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
     });
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_SET_OVERRIDE") {
@@ -543,7 +645,8 @@ async function handleMessage(msg, sender, sendResponse) {
         else await scheduleNextBurstAnchor();
       }
     });
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_SET_PAUSED") {
@@ -558,7 +661,8 @@ async function handleMessage(msg, sender, sendResponse) {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
     });
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_RELOAD_ALL_NOW") {
@@ -566,12 +670,14 @@ async function handleMessage(msg, sender, sendResponse) {
     const tok = await getValidToken();
     const nowSec = Math.floor(Date.now() / 1000);
     if (st[K.ENABLED] && !st[K.PAUSED] && tok && tok.exp > nowSec) reloadAllAtoZTabs();
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_TELEGRAM_LOG") {
     await sendTelegram(msg.userKey, msg.date, msg.time);
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_STORE_TELEGRAM_CONFIG") {
@@ -580,21 +686,23 @@ async function handleMessage(msg, sender, sendResponse) {
       const cidEnc = await encryptConfig(msg.chatId);
       if (tokEnc && cidEnc) {
         await setState({ sg_tg_bot_token_enc: tokEnc, sg_tg_chat_id_enc: cidEnc });
-        sendResponse && sendResponse({ ok: true });
+        safeSendResponse(sendResponse, { ok: true });
       } else {
-        sendResponse && sendResponse({ ok: false, error: "encryption-failed" });
+        safeSendResponse(sendResponse, { ok: false, error: "encryption-failed" });
       }
     } catch (e) {
       console.error("[SG SW] Store telegram config failed:", e);
-      sendResponse && sendResponse({ ok: false, error: e.message });
+      safeSendResponse(sendResponse, { ok: false, error: e.message });
     }
+    return;
   }
 
   if (msg.type === "SG_EID") {
     // Store employee ID relayed from content script for future use
     await setState({ sg_eid: msg.eid });
     console.log("[SG SW] Employee ID stored:", msg.eid);
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_POKE_SCHEDULE") {
@@ -613,43 +721,16 @@ async function handleMessage(msg, sender, sendResponse) {
         }
       }
     });
-    sendResponse && sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
+    return;
   }
 
   if (msg.type === "SG_HEARTBEAT") {
     const result = await sendHeartbeat();
-    sendResponse && sendResponse(result);
+    safeSendResponse(sendResponse, result);
+    return;
   }
 }
-
-// Circuit breaker wrapper
-/**
- * Returns true if the circuit breaker is currently open.
- * @returns {boolean}
- */
-function circuitBreakerOpen() {
-  return _cb.isOpen();
-}
-
-/**
- * Records a success or failure for the circuit breaker.
- * @param {boolean} success
- */
-function recordCircuitBreaker(success) {
-  _cb.record(success);
-  if (_cb.getState().open) {
-    console.warn("[SG SW] Circuit breaker OPEN — server unreachable, using cached token");
-  }
-  persistCircuitBreaker();
-}
-
-// Fetch remote config (stealth params, enabled features) from server
-async function fetchServerConfig() {
-  // No-op in offline mode — no server to fetch config from
-  return null;
-}
-
-// Offline license model — no server tokens to encrypt/decrypt
 
 /**
  * Verifies a license key with the server. Fail-closed: no self-issue fallback.
@@ -657,9 +738,18 @@ async function fetchServerConfig() {
  * @param {string} deviceId
  * @returns {Promise<{ok:boolean, reason?:string}>}
  */
-async function verifyLicense(key, deviceId) {
+async function verifyLicense(key) {
   try {
-    if (!key || !deviceId) return { ok: false, reason: "no-key" };
+    if (!key) return { ok: false, reason: "no-key" };
+
+    // Bundle integrity gate — if any shipped file was tampered with post-build,
+    // refuse to validate any key. This makes patching license-validator.js (or
+    // any other file) detectable even though only license-validator.js itself
+    // has selfDefending obfuscation.
+    const integrityOk = await verifyBundleIntegrity();
+    if (!integrityOk) {
+      return { ok: false, reason: "tamper-detected" };
+    }
 
     var fp = await SG_FINGERPRINT.getFingerprint();
     var result = await SG_LICENSE.validate(key, fp);
@@ -682,6 +772,18 @@ async function verifyLicense(key, deviceId) {
       sg_device_limit_reason: null,
       sg_device_cooldown_days: 0
     });
+
+    // Sign the license state — any later tampering via DevTools will fail verification.
+    // The HMAC key is embedded in obfuscated code, so attackers cannot forge a valid signature.
+    if (SG_LICENSE && SG_LICENSE.signState) {
+      var sig = await SG_LICENSE.signState({
+        exp: result.exp,
+        tier: result.tier,
+        userKey: key,
+        fp: fp
+      });
+      if (sig) await setState({ sg_license_state_sig: sig });
+    }
 
     console.log("[SG SW] License verified · tier:", result.tier, "· expires:", new Date(result.exp * 1000).toISOString());
     return { ok: true, tier: result.tier, exp: result.exp };
@@ -708,7 +810,7 @@ async function refreshTokenInBackground() {
       );
       deviceId = legacy.SG_deviceId || legacy.deviceId || "";
     }
-    const result = await verifyLicense(data[K.USER_KEY], deviceId);
+    const result = await verifyLicense(data[K.USER_KEY]);
     return result.ok;
   } catch (e) {
     console.error("[SG SW] Background token refresh error:", e);
@@ -730,7 +832,7 @@ async function tryAutoRefreshTokenIfNeeded() {
   if (!key || exp - nowSec > 300) return; // not expiring soon
   const ok = await refreshTokenInBackground();
   if (!ok) {
-    chrome.runtime.sendMessage({ type: "SG_REQUEST_TOKEN_REFRESH" }, () => {});
+    chrome.runtime.sendMessage({ type: "SG_REQUEST_TOKEN_REFRESH" });
   }
 }
 
@@ -771,7 +873,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   const existing = await getState();
   const merged = { ...DEFAULTS, ...existing };
   await setState(merged);
-  await restoreCircuitBreaker();
   await withAlarmLock(async () => {
     await clearAllAlarms();
     ensureTokenCheckAlarm();
@@ -782,7 +883,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // Initialize on browser startup
 chrome.runtime.onStartup.addListener(async () => {
-  await restoreCircuitBreaker();
   await withAlarmLock(async () => {
     await clearAllAlarms();
     ensureTokenCheckAlarm();
@@ -790,10 +890,10 @@ chrome.runtime.onStartup.addListener(async () => {
   });
   await flushTelegramQueue();
   const st     = await getState();
-  const cached = await loadEncryptedToken();
+  const cached = await getValidToken();
   const nowSec = Math.floor(Date.now() / 1000);
   await withAlarmLock(async () => {
-    if (st[K.ENABLED] && !st[K.PAUSED] && cached.token && cached.exp > nowSec) {
+    if (st[K.ENABLED] && !st[K.PAUSED] && cached && cached.exp > nowSec) {
       if (st[K.OVERRIDE]) await startOverrideTick();
       else await scheduleNextBurstAnchor();
     }

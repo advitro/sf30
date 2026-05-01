@@ -2,7 +2,7 @@
   "name": "sf30-license-server",
   "version": "1.0.0",
   "description": "SF30 V2 License Server — device-bound key activation",
-  "main": "server.js",
+  "main": "api/server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",

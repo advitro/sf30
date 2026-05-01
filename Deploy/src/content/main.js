@@ -49,13 +49,13 @@ setInterval(function () {
 // Tracks buttons we've already clicked this page load — prevents repeat clicks
 const clickedButtons = new WeakSet();
 
-function log(...a) { if (CFG.LOG) console.log("[ShiftGrabber]", ...a); }
+function log(...a) { if (CFG.LOG) {console.log("[ShiftGrabber]", ...a);} }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // --- Telegram logger ---------------------------------------------------------
 function getPageDate() {
   const m = window.location.href.match(/date=(\d{4}-\d{2}-\d{2})/);
-  if (!m) return null;
+  if (!m) {return null;}
   try {
     return new Date(m[1] + "T12:00:00").toLocaleDateString("en-US", {
       month: "short", day: "numeric", year: "numeric"
@@ -66,7 +66,7 @@ function getPageDate() {
 // Get tab's date from URL and calculate 7-day window
 function getTabDateWindow() {
   const m = window.location.href.match(/date=(\d{4}-\d{2}-\d{2})/);
-  if (!m) return null;
+  if (!m) {return null;}
   const startDate = m[1]; // YYYY-MM-DD
   const start = new Date(startDate + "T04:00:00.000Z");
   const end = new Date(start);
@@ -81,7 +81,7 @@ function getTabDateWindow() {
 async function sendTelegramLog() {
   try {
     const optOut = await new Promise(r => chrome.storage.local.get({ sg_tg_opt_out: false }, r));
-    if (optOut.sg_tg_opt_out) return;
+    if (optOut.sg_tg_opt_out) {return;}
     const store   = await new Promise(r => chrome.storage.local.get({ [K.USER_KEY]: "unknown" }, r));
     const userKey = store[K.USER_KEY] || "unknown";
     const date    = getPageDate() || "unknown date";
@@ -116,12 +116,12 @@ function showToast(msg, bg = "#22c55e", ms = 4000) {
       d.style.animation = "sgToastOut 0.3s ease forwards";
       setTimeout(() => d.remove(), 350);
     }, ms);
-  } catch {}
+  } catch { /* intentionally empty */ }
 }
 
 // Inject toast animations once
 (function injectToastStyles() {
-  if (document.getElementById("sg-toast-styles")) return;
+  if (document.getElementById("sg-toast-styles")) {return;}
   const s = document.createElement("style");
   s.id = "sg-toast-styles";
   s.textContent = `
@@ -132,13 +132,13 @@ function showToast(msg, bg = "#22c55e", ms = 4000) {
 })();
 
 function playAlert() {
-  if (!CFG.BEEP) return;
+  if (!CFG.BEEP) {return;}
   try {
     const a = document.createElement("audio");
     a.src = chrome.runtime.getURL("sounds/click.mp3");
     a.volume = 1.0;
     a.play().catch(() => {});
-  } catch {}
+  } catch { /* intentionally empty */ }
 }
 
 function flashOverlay(color) {
@@ -153,12 +153,12 @@ function flashOverlay(color) {
     setTimeout(() => { ov.style.opacity = "0.6"; }, 10);
     setTimeout(() => { ov.style.opacity = "0"; }, 160);
     setTimeout(() => ov.remove(), 320);
-  } catch {}
+  } catch { /* intentionally empty */ }
 }
 
 // --- HUD --------------------------------------------------------------------
 function mmss(ms) {
-  if (ms == null || ms <= 0) return "00:00";
+  if (ms === null || ms === undefined || ms <= 0) {return "00:00";}
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
@@ -174,7 +174,7 @@ function burstBars(remaining, total = 2) {
 }
 
 function ensureDot() {
-  if (dotEl) return;
+  if (dotEl) {return;}
   dotEl = document.createElement("div");
   dotEl.style.cssText = `
     position:fixed;bottom:18px;right:18px;z-index:2147483647;
@@ -205,7 +205,7 @@ function updateDot(st) {
 }
 
 function injectHUDStyles() {
-  if (document.getElementById("sg-hud-styles")) return;
+  if (document.getElementById("sg-hud-styles")) {return;}
   const style = document.createElement("style");
   style.id = "sg-hud-styles";
   style.textContent = `
@@ -333,7 +333,7 @@ function injectHUDStyles() {
 }
 
 function ensureHUD() {
-  if (hudEl) return;
+  if (hudEl) {return;}
   injectHUDStyles();
   hudEl = document.createElement("div");
   hudEl.className = "sg-hud sg-hud-enter";
@@ -352,7 +352,7 @@ function makeHUDDraggable(el) {
   let isDragging = false;
   let startX = 0, startY = 0, startLeft = 0, startTop = 0;
   el.addEventListener("mousedown", (e) => {
-    if (e.target.closest("button, a, input")) return;
+    if (e.target.closest("button, a, input")) {return;}
     isDragging = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -363,7 +363,7 @@ function makeHUDDraggable(el) {
     el.style.cursor = "grabbing";
   });
   window.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
+    if (!isDragging) {return;}
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     el.style.left = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, startLeft + dx)) + "px";
@@ -372,7 +372,7 @@ function makeHUDDraggable(el) {
     el.style.bottom = "auto";
   });
   window.addEventListener("mouseup", () => {
-    if (!isDragging) return;
+    if (!isDragging) {return;}
     isDragging = false;
     el.style.transition = "opacity 0.3s ease, transform 0.3s ease";
     el.style.cursor = "default";
@@ -383,7 +383,7 @@ function makeHUDDraggable(el) {
 
 function toggleHUD() {
   hudHidden = !hudHidden;
-  if (hudEl) hudEl.style.display = hudHidden ? "none" : "block";
+  if (hudEl) {hudEl.style.display = hudHidden ? "none" : "block";}
   ensureDot();
   chrome.storage.local.set({ sg_hud_hidden: hudHidden });
 }
@@ -423,7 +423,7 @@ async function updateHUD() {
   }
 
   updateDot(st);
-  if (hudHidden) return;
+  if (hudHidden) {return;}
 
   nowSec   = Math.floor(Date.now() / 1000);
   hasToken = st[K.TOKEN_EXP] && st[K.TOKEN_EXP] > nowSec;
@@ -514,7 +514,7 @@ function clickStayLoggedInIfPresent() {
         return true;
       }
     }
-  } catch {}
+  } catch { /* intentionally empty */ }
   return false;
 }
 
@@ -542,18 +542,18 @@ function findConfirmButton() {
 }
 
 async function tryToGrabShifts() {
-  if (isPaused) return false;
+  if (isPaused) {return false;}
 
   // Only consider buttons we haven't clicked yet this page load
   const addButtons = findAddShiftButtons().filter(btn => !clickedButtons.has(btn));
-  if (addButtons.length === 0) return false;
+  if (addButtons.length === 0) {return false;}
 
   const shifts = addButtons
     .map(btn => ({ btn, ...parseShiftInfo(btn) }))
     .sort((a, b) => b.total - a.total);
 
   for (let i = 0; i < shifts.length; i++) {
-    if (i > 0) await sleep(CFG.PER_SHIFT_STAGGER_MS);
+    if (i > 0) {await sleep(CFG.PER_SHIFT_STAGGER_MS);}
     const s = shifts[i];
 
     // Mark as clicked immediately so the loop never retries this button
@@ -568,7 +568,7 @@ async function tryToGrabShifts() {
         beep.src = chrome.runtime.getURL("sounds/click.mp3");
         beep.volume = 0.8;
         beep.play().catch(() => {});
-      } catch {}
+      } catch { /* intentionally empty */ }
 
       await sleep(CFG.CONFIRM_WAIT_MS);
       const c = findConfirmButton();
@@ -597,7 +597,7 @@ async function tryToGrabShifts() {
 // Random timing matches natural browser/human interaction variance.
 let mainLoopTimer = null;
 function startMainLoop() {
-  if (mainLoopTimer) return;
+  if (mainLoopTimer) {return;}
   (function loop() {
     clickStayLoggedInIfPresent();
     tryToGrabShifts();
@@ -611,7 +611,7 @@ function stopMainLoop() {
 
 // --- message handlers --------------------------------------------------------
 chrome.runtime.onMessage.addListener(async (msg) => {
-  if (!msg || !msg.type) return;
+  if (!msg || !msg.type) {return;}
 
   if (msg.type === "SG_SET_ENABLED") {
     const enabled = !!msg.value;
@@ -644,7 +644,7 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     await new Promise(r => chrome.storage.local.set({ [K.PAUSED]: next }, r));
     chrome.runtime.sendMessage({ type: "SG_SET_PAUSED", value: next });
     isPaused = next;
-    if (isPaused) stopApiPolling(); else startApiPolling();
+    if (isPaused) {stopApiPolling();} else {startApiPolling();}
     flashOverlay(isPaused ? "#f87171" : "#4ade80");
     updateHUD();
   }
@@ -665,7 +665,7 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "KeyP" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
     // PAUSE — stop polling IMMEDIATELY, don't wait for service worker
     isPaused = !isPaused;
-    if (isPaused) stopApiPolling(); else startApiPolling();
+    if (isPaused) {stopApiPolling();} else {startApiPolling();}
     chrome.storage.local.set({ [K.PAUSED]: isPaused });
     chrome.runtime.sendMessage({ type: "SG_SET_PAUSED", value: isPaused });
     flashOverlay(isPaused ? "#f87171" : "#4ade80");
@@ -680,9 +680,9 @@ window.addEventListener("keydown", (e) => {
     updateHUD();
   }
   if (e.shiftKey && e.code === "KeyH" && !e.ctrlKey && !e.altKey)
-    toggleHUD();
+    {toggleHUD();}
   if (e.code === "KeyR" && !e.shiftKey && !e.ctrlKey && !e.altKey)
-    chrome.runtime.sendMessage({ type: "SG_RELOAD_ALL_NOW" });
+    {chrome.runtime.sendMessage({ type: "SG_RELOAD_ALL_NOW" });}
   if (e.shiftKey && e.code === "KeyT" && !e.ctrlKey && !e.altKey) {
     turboMode = !turboMode;
     setApiSpeed(turboMode ? 500 : 1000);
@@ -694,7 +694,7 @@ window.addEventListener("keydown", (e) => {
 // We only listen for CLAIM RESULTS and EID relay here
 
 window.addEventListener('message', (e) => {
-  if (e.source !== window || !e.data?.sg) return;
+  if (e.source !== window || !e.data?.sg) {return;}
   // Validate secret on messages FROM api-layer.js to prevent spoofing
   if (e.data.secret !== SG_CONSTS.MSG_SECRET) {
     console.warn('[SG Main] Rejected message from api-layer with invalid secret');
@@ -733,7 +733,7 @@ window.addEventListener('message', (e) => {
     }
 
     // SUCCESS — but only notify once per oppId
-    if (apiClaimNotified[oppId]) return;
+    if (apiClaimNotified[oppId]) {return;}
     apiClaimNotified[oppId] = true;
 
     const shiftDate = d.shift?.start
@@ -754,7 +754,7 @@ window.addEventListener('message', (e) => {
 async function sendTelegramLogForDate(date) {
   try {
     const optOut = await new Promise(r => chrome.storage.local.get({ sg_tg_opt_out: false }, r));
-    if (optOut.sg_tg_opt_out) return;
+    if (optOut.sg_tg_opt_out) {return;}
     const store   = await new Promise(r => chrome.storage.local.get({ [K.USER_KEY]: "unknown" }, r));
     const userKey = store[K.USER_KEY] || "unknown";
     const time    = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -808,7 +808,7 @@ function setApiSpeed(interval) {
   }
 
   updateHUD();
-  if (hudTimer) clearInterval(hudTimer);
+  if (hudTimer) {clearInterval(hudTimer);}
   hudTimer = setInterval(updateHUD, 500);
 
   // Pause HUD updates when tab is hidden to save CPU/battery
@@ -816,7 +816,7 @@ function setApiSpeed(interval) {
     if (document.hidden) {
       if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
     } else {
-      if (!hudTimer) hudTimer = setInterval(updateHUD, 500);
+      if (!hudTimer) {hudTimer = setInterval(updateHUD, 500);}
       updateHUD();
     }
   });
@@ -834,7 +834,7 @@ function setApiSpeed(interval) {
   // This eliminates the race where a fixed 800ms delay could under- or over-shoot.
   (function waitForApiLayer(tries) {
     if (window.__sg_api_v3) {
-      if (!isPaused) startApiPolling();
+      if (!isPaused) {startApiPolling();}
     } else if (tries < 15) {
       setTimeout(() => waitForApiLayer(tries + 1), 100);
     } else {

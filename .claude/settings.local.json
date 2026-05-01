@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(SG_HMAC_KEY=test-hmac-key-for-local-build-only SG_ENV=production node build.js)",
+      "Bash(SG_HMAC_KEY=test-hmac-key-for-local-build-only SG_ENV=production \"/c/Program Files/nodejs/node.exe\" build.js)",
+      "PowerShell(Get-Command node -ErrorAction SilentlyContinue)",
+      "PowerShell($env:SG_HMAC_KEY = \"test-hmac-key-for-local-build-only\"; $env:SG_ENV = \"production\"; Set-Location 'c:\\\\Users\\\\Dexinox\\\\Documents\\\\GitHub\\\\atoz - tg ready\\\\SF30'; npm run build 2>&1 | Select-Object -First 120)"
+    ]
+  }
+}

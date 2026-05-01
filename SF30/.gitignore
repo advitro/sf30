@@ -1,0 +1,27 @@
+# Build artifacts
+dist/
+dist-debug/
+Deploy/
+
+# Dependencies
+node_modules/
+
+# Keys (never commit private keys)
+keys/private.key
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/

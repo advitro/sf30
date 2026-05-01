@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_FINGERPRINT) return;
+  if (global.SG_FINGERPRINT) {return;}
 
   var _cachedFingerprint = null;
   var _cachedComponents = "";
@@ -31,7 +31,7 @@
       ctx.fillStyle = "#069";
       ctx.fillText(txt, 2, 2);
       components.push(canvas.toDataURL().slice(-50)); // last 50 chars of data URL
-    } catch (e) {}
+    } catch (e) { /* intentionally empty */ }
 
     var raw = components.join("|");
 

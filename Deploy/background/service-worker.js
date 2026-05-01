@@ -69,7 +69,7 @@ async function sendHeartbeat() {
   try {
     const st = await getState();
     const key = st[K.USER_KEY];
-    if (!key) return { ok: false, reason: "no-key" };
+    if (!key) {return { ok: false, reason: "no-key" };}
 
     const fp = await SG_FINGERPRINT.getFingerprint();
     const result = await SG_LICENSE.validate(key, fp);
@@ -102,12 +102,12 @@ async function sendHeartbeat() {
  * @returns {{valid:boolean, reason?:string}}
  */
 function validateMessage(msg) {
-  if (!msg || typeof msg !== "object") return { valid: false, reason: "missing-message" };
-  if (!msg.type) return { valid: false, reason: "missing-type" };
+  if (!msg || typeof msg !== "object") {return { valid: false, reason: "missing-message" };}
+  if (!msg.type) {return { valid: false, reason: "missing-type" };}
   const schema = C.MSG_SCHEMA[msg.type];
-  if (!schema) return { valid: true }; // unknown types pass through
+  if (!schema) {return { valid: true };} // unknown types pass through
   for (const key of schema.required) {
-    if (!(key in msg)) return { valid: false, reason: "missing-field:" + key };
+    if (!(key in msg)) {return { valid: false, reason: "missing-field:" + key };}
   }
   return { valid: true };
 }
@@ -124,10 +124,10 @@ async function computeState() {
   const tok = await getValidToken();
   const hasToken = !!tok && tok.exp > nowSec;
 
-  if (!st[K.ENABLED]) return C.STATES.OFF;
-  if (!hasToken) return C.STATES.NO_KEY;
-  if (st[K.PAUSED]) return C.STATES.PAUSED;
-  if (st[K.OVERRIDE]) return C.STATES.FAST;
+  if (!st[K.ENABLED]) {return C.STATES.OFF;}
+  if (!hasToken) {return C.STATES.NO_KEY;}
+  if (st[K.PAUSED]) {return C.STATES.PAUSED;}
+  if (st[K.OVERRIDE]) {return C.STATES.FAST;}
   return C.STATES.LIVE;
 }
 
@@ -151,7 +151,7 @@ async function encryptConfig(value) {
  */
 async function decryptConfig(encrypted) {
   try {
-    if (!encrypted) return null;
+    if (!encrypted) {return null;}
     var fp = await SG_FINGERPRINT.getFingerprint();
     return await SG_CRYPTO.decrypt(encrypted, fp);
   } catch (e) { return null; }
@@ -206,13 +206,13 @@ async function flushTelegramQueue() {
   try {
     const res   = await new Promise(r => chrome.storage.local.get({ sg_tg_queue: [] }, r));
     const queue = res.sg_tg_queue || [];
-    if (queue.length === 0) return;
+    if (queue.length === 0) {return;}
     // Clear before sending — prevents double-send if SW restarts mid-flush
     await new Promise(r => chrome.storage.local.set({ sg_tg_queue: [] }, r));
     const failed = [];
     for (const item of queue) {
       const ok = await sendTelegram(item.userKey, item.date, item.time);
-      if (!ok) failed.push(item); // re-queue on Telegram API failure
+      if (!ok) {failed.push(item);} // re-queue on Telegram API failure
     }
     if (failed.length > 0) {
       // Merge back with any new items that arrived while we were flushing
@@ -228,9 +228,9 @@ async function flushTelegramQueue() {
 async function sendTelegram(userKey, date, time) {
   try {
     const optOut = await new Promise(r => chrome.storage.local.get({ sg_tg_opt_out: false }, r));
-    if (optOut.sg_tg_opt_out) return false; // user disabled Telegram notifications
+    if (optOut.sg_tg_opt_out) {return false;} // user disabled Telegram notifications
     const creds = await getTelegramCredentials();
-    if (!creds) return false; // fail silently if not configured
+    if (!creds) {return false;} // fail silently if not configured
     const text =
       `✅ <b>Shift Grabbed</b>\n` +
       `👤 <b>Key:</b> <code>${userKey}</code>\n` +
@@ -287,7 +287,7 @@ function nextFiveMinuteAnchorMinus800ms(from = new Date()) {
   d.setSeconds(0, 0);
   d.setMinutes(mins + add);
   d.setTime(d.getTime() - 800);
-  if (d.getTime() <= from.getTime()) d.setMinutes(d.getMinutes() + 5);
+  if (d.getTime() <= from.getTime()) {d.setMinutes(d.getMinutes() + 5);}
   return d;
 }
 
@@ -339,7 +339,7 @@ async function withAlarmLock(fn) {
   } finally {
     _alarmLock = false;
     const next = _alarmQueue.shift();
-    if (next) next();
+    if (next) {next();}
   }
 }
 
@@ -355,10 +355,10 @@ async function clearAllAlarms() {
 async function scheduleNextBurstAnchor() {
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || st[K.OVERRIDE] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || st[K.OVERRIDE] || st[K.PAUSED]) {return;}
   // token must be present and not expired
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   const anchor = nextFiveMinuteAnchorMinus800ms(new Date());
   await setState({ [K.NEXT_DUE]: anchor.getTime(), [K.BURST_REMAINING]: st[K.BURST_COUNT] });
@@ -368,9 +368,9 @@ async function scheduleNextBurstAnchor() {
 async function startOverrideTick() {
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || !st[K.OVERRIDE] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || !st[K.OVERRIDE] || st[K.PAUSED]) {return;}
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   const delay = jitteredDelay(st[K.BASE_MS], st[K.JITTER_MS]);
   await setState({ [K.NEXT_DUE]: Date.now() + delay, [K.BURST_REMAINING]: 0 });
@@ -394,14 +394,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || st[K.PAUSED]) {return;}
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   await flushTelegramQueue();
 
   if (alarm.name === "SG_BURST_START") {
-    if (st[K.OVERRIDE]) return;
+    if (st[K.OVERRIDE]) {return;}
     await setState({ [K.BURST_REMAINING]: st[K.BURST_COUNT] });
     reloadAllAtoZTabs();
     const left = st[K.BURST_COUNT] - 1;
@@ -417,9 +417,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === "SG_BURST_STEP") {
     const s2 = await getState();
-    if (!s2[K.ENABLED] || s2[K.PAUSED] || s2[K.OVERRIDE]) return;
+    if (!s2[K.ENABLED] || s2[K.PAUSED] || s2[K.OVERRIDE]) {return;}
     const tok2 = await getValidToken();
-    if (!tok2 || !tok2.exp || tok2.exp <= nowSec) return;
+    if (!tok2 || !tok2.exp || tok2.exp <= nowSec) {return;}
     reloadAllAtoZTabs();
     const left = Math.max(0, (s2[K.BURST_REMAINING] || 0) - 1);
     await setState({ [K.BURST_REMAINING]: left });
@@ -434,9 +434,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === "SG_OVERRIDE_TICK") {
     const s3 = await getState();
-    if (!s3[K.ENABLED] || !s3[K.OVERRIDE] || s3[K.PAUSED]) return;
+    if (!s3[K.ENABLED] || !s3[K.OVERRIDE] || s3[K.PAUSED]) {return;}
     const tok3 = await getValidToken();
-    if (!tok3 || !tok3.exp || tok3.exp <= nowSec) return;
+    if (!tok3 || !tok3.exp || tok3.exp <= nowSec) {return;}
     reloadAllAtoZTabs();
     await startOverrideTick();
   }
@@ -444,7 +444,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Handle messages from popup / content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
+  if (!msg || !msg.type) {return;}
   // Security: validate sender is from this extension only
   if (!sender || sender.id !== chrome.runtime.id) {
     console.warn("[SG SW] Blocked message from untrusted sender:", sender?.id);
@@ -479,8 +479,8 @@ async function handleMessage(msg, sender, sendResponse) {
         await clearAllAlarms();
         const st = await getState();
         if (st[K.ENABLED]) {
-          if (st[K.OVERRIDE]) await startOverrideTick();
-          else await scheduleNextBurstAnchor();
+          if (st[K.OVERRIDE]) {await startOverrideTick();}
+          else {await scheduleNextBurstAnchor();}
         }
       });
     } else {
@@ -502,8 +502,8 @@ async function handleMessage(msg, sender, sendResponse) {
       if (ok) {
         // token must be present (popup stored token). kick off scheduling
         if (st[K.ENABLED]) {
-          if (st[K.OVERRIDE]) await startOverrideTick();
-          else await scheduleNextBurstAnchor();
+          if (st[K.OVERRIDE]) {await startOverrideTick();}
+          else {await scheduleNextBurstAnchor();}
         }
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
@@ -524,8 +524,8 @@ async function handleMessage(msg, sender, sendResponse) {
       const st = await getState();
       if (st[K.ENABLED]) {
         ensureTokenCheckAlarm();
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
@@ -539,8 +539,8 @@ async function handleMessage(msg, sender, sendResponse) {
       await clearAllAlarms();
       const st = await getState();
       if (st[K.ENABLED]) {
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       }
     });
     sendResponse && sendResponse({ ok: true });
@@ -552,8 +552,8 @@ async function handleMessage(msg, sender, sendResponse) {
       await clearAllAlarms();
       const st = await getState();
       if (st[K.ENABLED] && !st[K.PAUSED]) {
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
@@ -565,7 +565,7 @@ async function handleMessage(msg, sender, sendResponse) {
     const st = await getState();
     const tok = await getValidToken();
     const nowSec = Math.floor(Date.now() / 1000);
-    if (st[K.ENABLED] && !st[K.PAUSED] && tok && tok.exp > nowSec) reloadAllAtoZTabs();
+    if (st[K.ENABLED] && !st[K.PAUSED] && tok && tok.exp > nowSec) {reloadAllAtoZTabs();}
     sendResponse && sendResponse({ ok: true });
   }
 
@@ -659,7 +659,7 @@ async function fetchServerConfig() {
  */
 async function verifyLicense(key, deviceId) {
   try {
-    if (!key || !deviceId) return { ok: false, reason: "no-key" };
+    if (!key || !deviceId) {return { ok: false, reason: "no-key" };}
 
     var fp = await SG_FINGERPRINT.getFingerprint();
     var result = await SG_LICENSE.validate(key, fp);
@@ -727,7 +727,7 @@ async function tryAutoRefreshTokenIfNeeded() {
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = st.sg_license_exp || 0;
   const key = st[K.USER_KEY] || "";
-  if (!key || exp - nowSec > 300) return; // not expiring soon
+  if (!key || exp - nowSec > 300) {return;} // not expiring soon
   const ok = await refreshTokenInBackground();
   if (!ok) {
     chrome.runtime.sendMessage({ type: "SG_REQUEST_TOKEN_REFRESH" }, () => {});
@@ -741,7 +741,7 @@ async function tryAutoRefreshTokenIfNeeded() {
  */
 function ensureTokenCheckAlarm() {
   chrome.alarms.get(ALARMS.TOKEN_CHECK, (alarm) => {
-    if (!alarm) chrome.alarms.create(ALARMS.TOKEN_CHECK, { delayInMinutes: 1, periodInMinutes: 2 });
+    if (!alarm) {chrome.alarms.create(ALARMS.TOKEN_CHECK, { delayInMinutes: 1, periodInMinutes: 2 });}
   });
 }
 
@@ -750,7 +750,7 @@ function ensureTokenCheckAlarm() {
  */
 function ensureHeartbeatAlarm() {
   chrome.alarms.get(ALARMS.HEARTBEAT, (alarm) => {
-    if (!alarm) chrome.alarms.create(ALARMS.HEARTBEAT, { delayInMinutes: 2, periodInMinutes: 10 });
+    if (!alarm) {chrome.alarms.create(ALARMS.HEARTBEAT, { delayInMinutes: 2, periodInMinutes: 10 });}
   });
 }
 
@@ -790,12 +790,12 @@ chrome.runtime.onStartup.addListener(async () => {
   });
   await flushTelegramQueue();
   const st     = await getState();
-  const cached = await loadEncryptedToken();
+  const cached = await getValidToken();
   const nowSec = Math.floor(Date.now() / 1000);
   await withAlarmLock(async () => {
     if (st[K.ENABLED] && !st[K.PAUSED] && cached.token && cached.exp > nowSec) {
-      if (st[K.OVERRIDE]) await startOverrideTick();
-      else await scheduleNextBurstAnchor();
+      if (st[K.OVERRIDE]) {await startOverrideTick();}
+      else {await scheduleNextBurstAnchor();}
     }
   });
 });

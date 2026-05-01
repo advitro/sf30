@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_CIRCUIT_BREAKER) return;
+  if (global.SG_CIRCUIT_BREAKER) {return;}
 
   /**
    * Creates a new circuit breaker instance.
@@ -18,11 +18,11 @@
     var lastFailure = 0;
 
     function isOpen() {
-      if (!open) return false;
+      if (!open) {return false;}
       if (Date.now() - lastFailure > cooldownMs) {
         open = false;
         failures = 0;
-        if (typeof onReset === "function") onReset();
+        if (typeof onReset === "function") {onReset();}
         return false;
       }
       return true;

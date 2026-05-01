@@ -1,7 +1,7 @@
 {
   "name": "sf30",
-  "version": "1.0.0",
-  "description": "SF30 V1.0 — Offline License Chrome Extension",
+  "version": "2.0.0",
+  "description": "SF30 V2.0 — Offline License Chrome Extension",
   "scripts": {
     "build": "node build.js",
     "build:zip": "node build.js && node zip.js",
@@ -14,11 +14,16 @@
   },
   "devDependencies": {
     "eslint": "^8.57.0",
+    "javascript-obfuscator": "^4.1.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
-    "javascript-obfuscator": "^4.1.0",
-    "puppeteer": "^21.0.0"
+    "puppeteer": "^21.0.0",
+    "terser": "^5.46.2"
   },
-  "keywords": ["chrome-extension", "shift-grabber", "amazon-atoz"],
+  "keywords": [
+    "chrome-extension",
+    "shift-grabber",
+    "amazon-atoz"
+  ],
   "private": true
 }

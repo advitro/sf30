@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_CONSTS) return; // Already loaded
+  if (global.SG_CONSTS) {return;} // Already loaded
 
   global.SG_CONSTS = {
     // ── Version ──
