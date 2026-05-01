@@ -126,6 +126,11 @@
       cursor: pointer;
     }
     .result-key:hover { opacity: 0.8; }
+    .result-expiry {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
     .copied {
       font-size: 12px;
       color: var(--green);
@@ -144,6 +149,12 @@
       display: none;
     }
     .error.show { display: block; }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--fg);
+    }
   </style>
 </head>
 <body>
@@ -155,6 +166,11 @@
       <div class="field">
         <label for="apiToken">Admin API Token</label>
         <input id="apiToken" type="password" placeholder="Paste your API token here" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="field">
+        <label for="customerEmail">Customer Email (optional)</label>
+        <input id="customerEmail" type="email" placeholder="customer@example.com">
       </div>
 
       <div class="row">
@@ -176,6 +192,7 @@
       <div class="result" id="resultBox">
         <div class="result-label">License Key — click to copy</div>
         <div class="result-key" id="resultKey"></div>
+        <div class="result-expiry" id="resultExpiry"></div>
         <div class="copied" id="copiedMsg">✓ Copied to clipboard</div>
       </div>
 
@@ -185,16 +202,23 @@
 
   <script>
     const apiTokenInput = document.getElementById('apiToken');
+    const emailInput = document.getElementById('customerEmail');
     const tierSelect = document.getElementById('tier');
     const daysInput = document.getElementById('days');
     const generateBtn = document.getElementById('generateBtn');
     const resultBox = document.getElementById('resultBox');
     const resultKey = document.getElementById('resultKey');
+    const resultExpiry = document.getElementById('resultExpiry');
     const copiedMsg = document.getElementById('copiedMsg');
     const errorBox = document.getElementById('errorBox');
 
     // Restore token from localStorage
     apiTokenInput.value = localStorage.getItem('sf30_admin_token') || '';
+
+    function formatDate(ts) {
+      const d = new Date(ts * 1000);
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
 
     function showError(msg) {
       errorBox.textContent = msg;
@@ -211,6 +235,7 @@
       const apiToken = apiTokenInput.value.trim();
       const tier = tierSelect.value;
       const days = parseInt(daysInput.value, 10);
+      const email = emailInput.value.trim() || null;
 
       if (!apiToken) {
         showError('Please enter your admin API token');
@@ -227,7 +252,7 @@
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiToken}`
           },
-          body: JSON.stringify({ tier, days }),
+          body: JSON.stringify({ tier, days, email }),
         });
 
         const data = await response.json();
@@ -241,6 +266,7 @@
         localStorage.setItem('sf30_admin_token', apiToken);
 
         resultKey.textContent = data.key;
+        resultExpiry.textContent = 'Expires: ' + formatDate(data.expiresAt);
         resultBox.classList.add('show');
         copiedMsg.classList.remove('show');
       } catch (e) {
@@ -261,7 +287,6 @@
         copiedMsg.classList.add('show');
         setTimeout(() => copiedMsg.classList.remove('show'), 2000);
       } catch {
-        // Fallback
         const range = document.createRange();
         range.selectNode(resultKey);
         window.getSelection().removeAllRanges();

@@ -15,7 +15,11 @@ import cors from 'cors';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { createLicense, getLicense, activateLicense, listRevoked, createCustomer, getCustomerByLicense, listAllCustomers, createPendingPayment, getPendingPayment, completePendingPayment, extendLicenseExpiry, recordRenewal, getLicenseRenewals } from './db.js';
+import {
+  createLicense, getLicense, activateLicense, listRevoked,
+  createCustomer, getCustomerByLicense, listAllCustomers,
+  getLicenseRenewals
+} from './db.js';
 import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,12 +27,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DEFAULT_DAYS = parseInt(process.env.DEFAULT_DAYS || '30', 10);
 const API_TOKEN = process.env.API_TOKEN;
-
-// ── BitPay Config ──
-const BITPAY_API_TOKEN = process.env.BITPAY_API_TOKEN;
-const BITPAY_ENV = process.env.BITPAY_ENV || 'prod';
-const BITPAY_BASE_URL = BITPAY_ENV === 'test' ? 'https://test.bitpay.com' : 'https://bitpay.com';
-const SERVER_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
 
 const app = express();
 app.use(express.json());
@@ -165,8 +163,6 @@ app.post('/api/v2/validate', async (req, res) => {
 
 /**
  * GET /api/v2/revocations
- * Returns: { revokedKeys: [...], updatedAt }
- * Supports ETag conditional requests (304 Not Modified)
  */
 app.get('/api/v2/revocations', async (req, res) => {
   try {
@@ -187,215 +183,6 @@ app.get('/api/v2/revocations', async (req, res) => {
   }
 });
 
-// ── Checkout (BitPay) ──
-
-app.post('/api/checkout', async (req, res) => {
-  if (!BITPAY_API_TOKEN) {
-    return res.status(503).json({ ok: false, error: 'Payment processor not configured' });
-  }
-
-  const { renewKey } = req.body || {};
-  const orderId = renewKey ? `renew:${renewKey}` : crypto.randomUUID();
-  const now = nowSeconds();
-
-  try {
-    const bpRes = await fetch(`${BITPAY_BASE_URL}/invoices`, {
-      method: 'POST',
-      headers: {
-        'X-Accept-Version': '2.0.0',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        token: BITPAY_API_TOKEN,
-        price: 99,
-        currency: 'CAD',
-        orderId: orderId,
-        itemDesc: 'Shift Grabber — Monthly Subscription (1 Device)',
-        notificationURL: `${SERVER_URL}/api/webhook/bitpay`,
-        redirectURL: `${SERVER_URL}/success.html?invoice_id=${orderId}`,
-        closeURL: `${SERVER_URL}/`,
-        extendedNotifications: true,
-      }),
-    });
-
-    const bpData = await bpRes.json();
-    if (!bpRes.ok || !bpData.data) {
-      console.error('[checkout] BitPay error:', bpData);
-      return res.status(502).json({ ok: false, error: 'Payment provider error' });
-    }
-
-    const invoice = bpData.data;
-
-    // Store pending payment in our DB
-    await createPendingPayment({
-      paymentId: orderId,
-      status: 'pending',
-      licenseKey: null,
-      amountCad: '99.00',
-      createdAt: now,
-    });
-
-    return res.json({ ok: true, url: invoice.url });
-  } catch (e) {
-    console.error('[checkout]', e);
-    return res.status(500).json({ ok: false, error: 'Checkout failed' });
-  }
-});
-
-// ── Payment Status (polled by success page) ──
-
-app.get('/api/payment-status', async (req, res) => {
-  const { invoice_id } = req.query;
-  if (!invoice_id) {
-    return res.status(400).json({ ok: false, error: 'Missing invoice_id' });
-  }
-
-  try {
-    // First check our DB
-    const record = await getPendingPayment(invoice_id);
-    if (!record) {
-      return res.status(404).json({ ok: false, error: 'Payment not found' });
-    }
-
-    if (record.status === 'completed' && record.license_key) {
-      // Get expiry info
-      const license = await getLicense(record.license_key);
-      return res.json({ ok: true, status: 'completed', key: record.license_key, expiresAt: license?.expires_at });
-    }
-
-    // Fallback: verify with BitPay API directly
-    if (BITPAY_API_TOKEN) {
-      try {
-        const bpRes = await fetch(`${BITPAY_BASE_URL}/invoices/${invoice_id}?token=${BITPAY_API_TOKEN}`);
-        const bpData = await bpRes.json();
-        if (bpRes.ok && bpData.data && (bpData.data.status === 'confirmed' || bpData.data.status === 'complete')) {
-          // BitPay says it's paid but our webhook hasn't processed it yet
-          return res.json({ ok: true, status: 'processing' });
-        }
-      } catch (e) {
-        // ignore BitPay polling errors
-      }
-    }
-
-    return res.json({ ok: true, status: 'pending' });
-  } catch (e) {
-    console.error('[payment-status]', e);
-    return res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// ── BitPay Webhook ──
-
-app.post('/api/webhook/bitpay', async (req, res) => {
-  // Always respond 200 to BitPay so they don't retry
-  res.status(200).json({ received: true });
-
-  const payload = req.body || {};
-  const { id, orderId, status } = payload.data || {};
-
-  if (!orderId || !id) {
-    console.log('[webhook] Ignoring — missing orderId or invoice id');
-    return;
-  }
-
-  // Only act on confirmed/complete statuses
-  if (status !== 'confirmed' && status !== 'complete') {
-    console.log('[webhook] Ignoring — status:', status);
-    return;
-  }
-
-  try {
-    // Verify with BitPay API that this invoice is actually paid
-    const verifyRes = await fetch(`${BITPAY_BASE_URL}/invoices/${id}?token=${BITPAY_API_TOKEN}`);
-    const verifyData = await verifyRes.json();
-    if (!verifyRes.ok || !verifyData.data) {
-      console.log('[webhook] Verification failed:', verifyData);
-      return;
-    }
-    const invoice = verifyData.data;
-    if (invoice.status !== 'confirmed' && invoice.status !== 'complete') {
-      console.log('[webhook] Invoice not confirmed/complete:', invoice.status);
-      return;
-    }
-
-    const now = nowSeconds();
-    const expiresAt = daysFromNow(30);
-    const isRenewal = orderId.startsWith('renew:');
-
-    if (isRenewal) {
-      const existingKey = orderId.replace('renew:', '');
-      const license = await getLicense(existingKey);
-      if (!license) {
-        console.log('[webhook] License not found for renewal:', existingKey);
-        return;
-      }
-
-      // Extend expiry by 30 days from now
-      await extendLicenseExpiry(existingKey, expiresAt);
-      await recordRenewal({
-        licenseKey: existingKey,
-        invoiceId: id,
-        amountCad: '99.00',
-        paidAt: now,
-        periodStart: now,
-        periodEnd: expiresAt,
-      });
-      await completePendingPayment(orderId, { licenseKey: existingKey, completedAt: now });
-
-      console.log('[webhook] License renewed:', existingKey, 'new expiry:', expiresAt);
-    } else {
-      // Check if we already completed this payment
-      const existing = await getPendingPayment(orderId);
-      if (!existing) {
-        console.log('[webhook] Unknown order:', orderId);
-        return;
-      }
-      if (existing.status === 'completed') {
-        console.log('[webhook] Already completed:', orderId);
-        return;
-      }
-
-      // Generate new license key with 30-day expiry
-      const key = generateLicenseKey();
-
-      await createLicense({
-        key,
-        fingerprintHash: null,
-        tier: 'basic',
-        createdAt: now,
-        expiresAt,
-      });
-
-      await completePendingPayment(orderId, { licenseKey: key, completedAt: now });
-      await recordRenewal({
-        licenseKey: key,
-        invoiceId: id,
-        amountCad: '99.00',
-        paidAt: now,
-        periodStart: now,
-        periodEnd: expiresAt,
-      });
-
-      // Store customer info from BitPay
-      const buyerEmail = invoice.buyer?.email || null;
-      if (buyerEmail) {
-        await createCustomer({
-          email: buyerEmail,
-          stripeCustomerId: null,
-          stripeSubscriptionId: id,
-          licenseKey: key,
-          tier: 'basic',
-          createdAt: now,
-        });
-      }
-
-      console.log('[webhook] License created:', key, 'expiry:', expiresAt);
-    }
-  } catch (e) {
-    console.error('[webhook] Error processing payment:', e);
-  }
-});
-
 // ── Download ──
 
 app.get('/download', (_req, res) => {
@@ -412,7 +199,7 @@ app.get('/admin.html', (_req, res) => {
 });
 
 app.post('/api/admin/generate', requireAdminToken, async (req, res) => {
-  const { tier, days } = req.body || {};
+  const { tier, days, email } = req.body || {};
 
   const key = generateLicenseKey();
   const now = nowSeconds();
@@ -426,6 +213,18 @@ app.post('/api/admin/generate', requireAdminToken, async (req, res) => {
       createdAt: now,
       expiresAt,
     });
+
+    if (email && typeof email === 'string') {
+      await createCustomer({
+        email,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        licenseKey: key,
+        tier: tier || 'basic',
+        createdAt: now,
+      });
+    }
+
     res.json({ ok: true, key, tier: tier || 'basic', expiresAt });
   } catch (e) {
     console.error('[admin/generate]', e);
