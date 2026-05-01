@@ -691,7 +691,7 @@ function recordCircuitBreaker(success) {
 // ── Server API Helpers ──
 
 const SERVER_URL = URLS.SERVER || "";
-const PLACEHOLDER_URL = "__SG_SERVER_URL__";
+const PLACEHOLDER_URL = "__SG_SERVER_URL_PLACEHOLDER__";
 
 function serverConfigured() {
   return SERVER_URL && SERVER_URL !== PLACEHOLDER_URL && SERVER_URL.startsWith("http");
