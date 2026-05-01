@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SF30 License Admin</title>
+  <style>
+    :root {
+      --bg: #16171f;
+      --card: #1e1f28;
+      --border: #2c2d3a;
+      --fg: #dde1f0;
+      --muted: #6b6e85;
+      --blue: #60a5fa;
+      --green: #4ade80;
+      --red: #f87171;
+      --font: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      width: 100%;
+      max-width: 480px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 6px;
+      letter-spacing: -0.3px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      background: #12131a;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, select:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+    }
+    .field {
+      margin-bottom: 16px;
+    }
+    .field:last-child { margin-bottom: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 12px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: var(--blue);
+      color: #0a0b12;
+      border: none;
+      border-radius: 9px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .result {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
+      background: rgba(74, 222, 128, 0.08);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 10px;
+    }
+    .result.show { display: block; }
+    .result-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .result-key {
+      font-family: ui-monospace, monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--green);
+      word-break: break-all;
+      cursor: pointer;
+    }
+    .result-key:hover { opacity: 0.8; }
+    .copied {
+      font-size: 12px;
+      color: var(--green);
+      margin-top: 6px;
+      display: none;
+    }
+    .copied.show { display: block; }
+    .error {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: rgba(248, 113, 113, 0.08);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: 8px;
+      color: var(--red);
+      font-size: 13px;
+      display: none;
+    }
+    .error.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SF30 License Admin</h1>
+    <p class="subtitle">Generate device-bound license keys for your customers</p>
+
+    <div class="card">
+      <div class="field">
+        <label for="apiToken">Admin API Token</label>
+        <input id="apiToken" type="password" placeholder="Paste your API token here" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="field">
+        <label for="fingerprint">Customer Fingerprint</label>
+        <input id="fingerprint" type="text" placeholder="Paste fingerprint hash here" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="tier">Tier</label>
+          <select id="tier">
+            <option value="basic">Basic</option>
+            <option value="pro">Pro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="days">Days</label>
+          <input id="days" type="number" value="30" min="1" max="365">
+        </div>
+      </div>
+
+      <button id="generateBtn">Generate License Key</button>
+
+      <div class="result" id="resultBox">
+        <div class="result-label">License Key — click to copy</div>
+        <div class="result-key" id="resultKey"></div>
+        <div class="copied" id="copiedMsg">✓ Copied to clipboard</div>
+      </div>
+
+      <div class="error" id="errorBox"></div>
+    </div>
+  </div>
+
+  <script>
+    const apiTokenInput = document.getElementById('apiToken');
+    const fingerprintInput = document.getElementById('fingerprint');
+    const tierSelect = document.getElementById('tier');
+    const daysInput = document.getElementById('days');
+    const generateBtn = document.getElementById('generateBtn');
+    const resultBox = document.getElementById('resultBox');
+    const resultKey = document.getElementById('resultKey');
+    const copiedMsg = document.getElementById('copiedMsg');
+    const errorBox = document.getElementById('errorBox');
+
+    // Restore token from localStorage
+    apiTokenInput.value = localStorage.getItem('sf30_admin_token') || '';
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.add('show');
+      resultBox.classList.remove('show');
+    }
+
+    function hideError() {
+      errorBox.classList.remove('show');
+    }
+
+    async function generateKey() {
+      hideError();
+      const apiToken = apiTokenInput.value.trim();
+      const fingerprint = fingerprintInput.value.trim();
+      const tier = tierSelect.value;
+      const days = parseInt(daysInput.value, 10);
+
+      if (!apiToken) {
+        showError('Please enter your admin API token');
+        return;
+      }
+
+      if (!fingerprint) {
+        showError('Please enter the customer fingerprint hash');
+        return;
+      }
+
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'Generating...';
+
+      try {
+        const response = await fetch('/api/admin/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiToken}`
+          },
+          body: JSON.stringify({ fingerprint, tier, days }),
+        });
+
+        const data = await response.json();
+
+        if (!data.ok) {
+          showError(data.error || 'Generation failed');
+          return;
+        }
+
+        // Save token for next time
+        localStorage.setItem('sf30_admin_token', apiToken);
+
+        resultKey.textContent = data.key;
+        resultBox.classList.add('show');
+        copiedMsg.classList.remove('show');
+      } catch (e) {
+        showError('Network error — is the server running?');
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate License Key';
+      }
+    }
+
+    generateBtn.addEventListener('click', generateKey);
+
+    resultKey.addEventListener('click', async () => {
+      const text = resultKey.textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        copiedMsg.classList.add('show');
+        setTimeout(() => copiedMsg.classList.remove('show'), 2000);
+      } catch {
+        // Fallback
+        const range = document.createRange();
+        range.selectNode(resultKey);
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+      }
+    });
+  </script>
+</body>
+</html>
