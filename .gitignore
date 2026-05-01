@@ -1,5 +1,6 @@
 # Build artifacts
 dist/
+dist-debug/
 node_modules/
 
 # Generated customer packages

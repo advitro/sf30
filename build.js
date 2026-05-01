@@ -250,6 +250,25 @@ const SW_SHARED_FILES = [
   "src/shared/license-validator.js"
 ];
 
+const POPUP_FILES = [
+  "src/shared/constants.js",
+  "src/shared/crypto.js",
+  "src/shared/fingerprint.js"
+];
+
+const CONTENT_ISOLATED_FILES = [
+  "src/shared/constants.js",
+  "src/shared/crypto.js",
+  "src/shared/fingerprint.js",
+  "src/shared/license-validator.js"
+];
+
+const CONTENT_MAIN_FILES = [
+  "src/shared/constants.js",
+  "src/shared/fingerprint.js",
+  "src/shared/license-validator.js"
+];
+
 function buildServiceWorkerBundle() {
   const parts = [];
   for (const file of SW_SHARED_FILES) {
@@ -270,6 +289,26 @@ function buildServiceWorkerBundle() {
   return parts.join("\n");
 }
 
+function buildBundle(depFiles, entryFile) {
+  const parts = [];
+  for (const file of depFiles) {
+    const srcPath = path.join(SRC_DIR, file);
+    if (!fs.existsSync(srcPath)) {
+      console.warn("⚠️  Bundle dependency not found:", file);
+      continue;
+    }
+    parts.push(preprocessSource(srcPath));
+  }
+
+  const entryPath = path.join(SRC_DIR, entryFile);
+  let entryCode = preprocessSource(entryPath);
+  // Remove importScripts calls — dependencies are now bundled inline
+  entryCode = entryCode.replace(/importScripts\([^)]+\);?\s*\n?/g, "");
+  parts.push(entryCode);
+
+  return parts.join("\n");
+}
+
 // Build and obfuscate the SW bundle first
 const swBundle = buildServiceWorkerBundle();
 const swBundleTemp = path.join(SRC_DIR, "background/service-worker.bundle.tmp");
@@ -277,22 +316,25 @@ fs.writeFileSync(swBundleTemp, swBundle, "utf-8");
 obfuscateFile(swBundleTemp, path.join(DIST_DIR, "background/service-worker.js"), OBF_CONFIG_SW);
 fs.unlinkSync(swBundleTemp);
 
-// Obfuscate remaining JS files (content scripts, popup, shared files for content scripts)
-for (const pattern of OBFUSCATE_PATTERNS) {
-  if (pattern.includes("service-worker")) continue; // already bundled above
-  const src = path.join(SRC_DIR, pattern);
-  const dest = path.join(DIST_DIR, pattern);
-  if (fs.existsSync(src)) {
-    // Pre-process source to inject secrets/URLs before obfuscation
-    const preprocessed = preprocessSource(src);
-    const tempSrc = src + ".tmp";
-    fs.writeFileSync(tempSrc, preprocessed, "utf-8");
-    obfuscateFile(tempSrc, dest, null);
-    fs.unlinkSync(tempSrc);
-  } else {
-    console.warn("⚠️  Not found:", pattern);
-  }
-}
+// Build and obfuscate popup bundle (all popup deps + popup.js in one file)
+const popupBundle = buildBundle(POPUP_FILES, "popup/popup.js");
+const popupBundleTemp = path.join(SRC_DIR, "popup/popup.bundle.tmp");
+fs.writeFileSync(popupBundleTemp, popupBundle, "utf-8");
+obfuscateFile(popupBundleTemp, path.join(DIST_DIR, "popup/popup.bundle.js"), OBF_CONFIG);
+fs.unlinkSync(popupBundleTemp);
+
+// Build and obfuscate content script bundles
+const contentIsolatedBundle = buildBundle(CONTENT_ISOLATED_FILES, "src/content/main.js");
+const contentIsolatedTemp = path.join(SRC_DIR, "src/content/content-isolated.bundle.tmp");
+fs.writeFileSync(contentIsolatedTemp, contentIsolatedBundle, "utf-8");
+obfuscateFile(contentIsolatedTemp, path.join(DIST_DIR, "src/content/content-isolated.bundle.js"), OBF_CONFIG);
+fs.unlinkSync(contentIsolatedTemp);
+
+const contentMainBundle = buildBundle(CONTENT_MAIN_FILES, "src/content/api-layer.js");
+const contentMainTemp = path.join(SRC_DIR, "src/content/content-main.bundle.tmp");
+fs.writeFileSync(contentMainTemp, contentMainBundle, "utf-8");
+obfuscateFile(contentMainTemp, path.join(DIST_DIR, "src/content/content-main.bundle.js"), OBF_CONFIG);
+fs.unlinkSync(contentMainTemp);
 
 // Copy static files
 for (const pattern of COPY_PATTERNS) {
@@ -329,8 +371,14 @@ if (ENV_CONFIG.OBFUSCATE !== false) {
   const randName = () => "_" + crypto.randomBytes(6).toString("hex");
   GLOBAL_NAMES.forEach((name) => { globalNameMap[name] = randName(); });
 
-  for (const pattern of OBFUSCATE_PATTERNS) {
-    const dest = path.join(DIST_DIR, pattern);
+  const BUNDLE_PATHS = [
+    "background/service-worker.js",
+    "popup/popup.bundle.js",
+    "src/content/content-isolated.bundle.js",
+    "src/content/content-main.bundle.js"
+  ];
+  for (const bundlePath of BUNDLE_PATHS) {
+    const dest = path.join(DIST_DIR, bundlePath);
     if (fs.existsSync(dest)) {
       let code = fs.readFileSync(dest, "utf-8");
       for (const [oldName, newName] of Object.entries(globalNameMap)) {

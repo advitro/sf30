@@ -35,13 +35,13 @@
   "content_scripts": [
     {
       "matches": ["https://atoz.amazon.work/*"],
-      "js": ["src/shared/constants.js", "src/shared/crypto.js", "src/shared/fingerprint.js", "src/shared/license-validator.js", "src/content/main.js"],
+      "js": ["src/content/content-isolated.bundle.js"],
       "run_at": "document_end",
       "all_frames": false
     },
     {
       "matches": ["https://atoz.amazon.work/*"],
-      "js": ["src/shared/constants.js", "src/shared/fingerprint.js", "src/shared/license-validator.js", "src/content/api-layer.js"],
+      "js": ["src/content/content-main.bundle.js"],
       "run_at": "document_end",
       "world": "MAIN",
       "all_frames": false
