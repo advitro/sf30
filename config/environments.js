@@ -38,7 +38,9 @@ module.exports = {
 
   production: {
     ...COMMON,
-    SERVER_URL: "https://shiftgrabber.net",
+    // NOTE: Set up custom domain in Vercel Dashboard → Domains for a clean URL.
+    // Until then, the Vercel production URL is: https://project-qgqvr.vercel.app
+    SERVER_URL: "https://api.shiftgrabber.net",
     CONTACT_URL: "https://t.me/shift_grabber",
     DEBUG: false,
     OBFUSCATE: true,

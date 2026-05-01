@@ -179,6 +179,10 @@ function preprocessSource(srcPath) {
   const contactUrl = ENV_CONFIG.CONTACT_URL || "https://t.me/shift_grabber";
   code = code.split("__SG_CONTACT_URL__").join(contactUrl);
 
+  // Replace server URL placeholder in ALL files
+  const serverUrl = ENV_CONFIG.SERVER_URL || "";
+  code = code.split('"__SG_SERVER_URL__"').join('"' + serverUrl + '"');
+
   // Replace license public key placeholder in constants.js
   if (srcPath.includes("constants")) {
     if (licensePublicKey) {

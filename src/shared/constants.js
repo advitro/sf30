@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  if (global.SG_CONSTS) return; // Already loaded
+  if (global.SG_CONSTS) {return;} // Already loaded
 
   global.SG_CONSTS = {
     // ── Version ──
@@ -68,7 +68,8 @@
     URLS: {
       GQL:          "https://atoz-apps.amazon.work/apis/ScheduleManagementService/graphql",
       CONTACT_URL:  "__SG_CONTACT_URL__",
-      TELEGRAM_API: "https://api.telegram.org"
+      TELEGRAM_API: "https://api.telegram.org",
+      SERVER:       "__SG_SERVER_URL__"
     },
 
     // ── License (embedded at build time) ──
