@@ -15,7 +15,7 @@ import cors from 'cors';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { createLicense, getLicense, activateLicense, listRevoked, createCustomer, createPendingPayment, getPendingPayment, completePendingPayment, extendLicenseExpiry, recordRenewal } from './db.js';
+import { createLicense, getLicense, activateLicense, listRevoked, createCustomer, getCustomerByLicense, listAllCustomers, createPendingPayment, getPendingPayment, completePendingPayment, extendLicenseExpiry, recordRenewal, getLicenseRenewals } from './db.js';
 import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -376,6 +376,19 @@ app.post('/api/webhook/bitpay', async (req, res) => {
         periodEnd: expiresAt,
       });
 
+      // Store customer info from BitPay
+      const buyerEmail = invoice.buyer?.email || null;
+      if (buyerEmail) {
+        await createCustomer({
+          email: buyerEmail,
+          stripeCustomerId: null,
+          stripeSubscriptionId: id,
+          licenseKey: key,
+          tier: 'basic',
+          createdAt: now,
+        });
+      }
+
       console.log('[webhook] License created:', key, 'expiry:', expiresAt);
     }
   } catch (e) {
@@ -416,6 +429,36 @@ app.post('/api/admin/generate', requireAdminToken, async (req, res) => {
     res.json({ ok: true, key, tier: tier || 'basic', expiresAt });
   } catch (e) {
     console.error('[admin/generate]', e);
+    res.status(500).json({ ok: false, error: 'Database error' });
+  }
+});
+
+// ── Admin: List Customers ──
+
+app.get('/api/admin/customers', requireAdminToken, async (_req, res) => {
+  try {
+    const rows = await listAllCustomers();
+    res.json({ ok: true, customers: rows });
+  } catch (e) {
+    console.error('[admin/customers]', e);
+    res.status(500).json({ ok: false, error: 'Database error' });
+  }
+});
+
+// ── Admin: Customer Detail + Renewals ──
+
+app.get('/api/admin/customers/:key', requireAdminToken, async (req, res) => {
+  const { key } = req.params;
+  try {
+    const license = await getLicense(key);
+    if (!license) {
+      return res.status(404).json({ ok: false, error: 'License not found' });
+    }
+    const customer = await getCustomerByLicense(key);
+    const renewals = await getLicenseRenewals(key);
+    res.json({ ok: true, license, customer, renewals });
+  } catch (e) {
+    console.error('[admin/customer-detail]', e);
     res.status(500).json({ ok: false, error: 'Database error' });
   }
 });

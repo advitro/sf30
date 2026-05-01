@@ -155,6 +155,18 @@ async function initPostgres() {
         SELECT * FROM renewals WHERE license_key = ${key} ORDER BY period_start DESC
       `;
     },
+    async listAllCustomers() {
+      return sql`
+        SELECT c.email, c.license_key, c.created_at, l.expires_at, l.activated_at, l.fingerprint_hash
+        FROM customers c
+        LEFT JOIN licenses l ON c.license_key = l.key
+        ORDER BY c.created_at DESC
+      `;
+    },
+    async getCustomerByLicense(key) {
+      const rows = await sql`SELECT * FROM customers WHERE license_key = ${key}`;
+      return rows[0] || null;
+    },
   };
 }
 
@@ -249,6 +261,13 @@ async function initSQLite() {
       'INSERT INTO renewals (license_key, invoice_id, amount_cad, paid_at, period_start, period_end) VALUES (?, ?, ?, ?, ?, ?)'
     ),
     findRenewals: db.prepare('SELECT * FROM renewals WHERE license_key = ? ORDER BY period_start DESC'),
+    listAllCustomers: db.prepare(`
+      SELECT c.email, c.license_key, c.created_at, l.expires_at, l.activated_at, l.fingerprint_hash
+      FROM customers c
+      LEFT JOIN licenses l ON c.license_key = l.key
+      ORDER BY c.created_at DESC
+    `),
+    findCustomerByLicense: db.prepare('SELECT * FROM customers WHERE license_key = ?'),
   };
 
   return {
@@ -273,6 +292,8 @@ async function initSQLite() {
     recordRenewal: ({ licenseKey, invoiceId, amountCad, paidAt, periodStart, periodEnd }) =>
       stmts.insertRenewal.run(licenseKey, invoiceId, amountCad, paidAt, periodStart, periodEnd),
     getLicenseRenewals: (key) => stmts.findRenewals.all(key),
+    listAllCustomers: () => stmts.listAllCustomers.all(),
+    getCustomerByLicense: (key) => stmts.findCustomerByLicense.get(key) || null,
   };
 }
 
@@ -336,4 +357,8 @@ export async function recordRenewal(...args) {
 export async function getLicenseRenewals(...args) {
   const db = await getDb();
   return db.getLicenseRenewals(...args);
+}
+export async function listAllCustomers(...args) {
+  const db = await getDb();
+  return db.listAllCustomers(...args);
 }
