@@ -6,3 +6,4 @@ node_modules/
 Deploy/shift-grabber-v9.zip
 
 .vercel/
+.vercel

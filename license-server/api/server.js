@@ -15,7 +15,7 @@ import cors from 'cors';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { createLicense, getLicense, activateLicense, listRevoked, createCustomer } from './db.js';
+import { createLicense, getLicense, activateLicense, listRevoked, createCustomer, createPendingPayment, getPendingPayment, completePendingPayment } from './db.js';
 import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,6 +23,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DEFAULT_DAYS = parseInt(process.env.DEFAULT_DAYS || '30', 10);
 const API_TOKEN = process.env.API_TOKEN;
+
+// ── NOWPayments Config ──
+const NOWPAYMENTS_API_KEY = process.env.NOWPAYMENTS_API_KEY;
+const NOWPAYMENTS_PAYOUT_CURRENCY = process.env.NOWPAYMENTS_PAYOUT_CURRENCY || 'usdt';
+const SERVER_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
 
 const app = express();
 app.use(express.json());
@@ -181,47 +186,135 @@ app.get('/api/v2/revocations', async (req, res) => {
   }
 });
 
-// ── Checkout (Stripe or demo fallback) ──
+// ── Checkout (NOWPayments) ──
 
 app.post('/api/checkout', async (req, res) => {
-  const { tier, email } = req.body || {};
-  const selectedTier = tier === 'pro' ? 'pro' : 'basic';
-
-  // If Stripe is not configured, generate a demo key immediately
-  const stripeSecret = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecret) {
-    const key = generateLicenseKey();
-    const now = nowSeconds();
-    const expiresAt = daysFromNow(DEFAULT_DAYS);
-    try {
-      await createLicense({
-        key,
-        fingerprintHash: null,
-        tier: selectedTier,
-        createdAt: now,
-        expiresAt,
-      });
-      if (email) {
-        await createCustomer({
-          email,
-          stripeCustomerId: null,
-          stripeSubscriptionId: null,
-          licenseKey: key,
-          tier: selectedTier,
-          createdAt: now,
-        });
-      }
-      return res.json({ ok: true, demoKey: key, tier: selectedTier, note: 'Stripe not configured — demo key generated' });
-    } catch (e) {
-      console.error('[checkout]', e);
-      return res.status(500).json({ ok: false, error: 'Key generation failed' });
-    }
+  if (!NOWPAYMENTS_API_KEY) {
+    return res.status(503).json({ ok: false, error: 'Payment processor not configured' });
   }
 
-  // TODO: Integrate Stripe Checkout Session creation here
-  // const session = await stripe.checkout.sessions.create({...});
-  // return res.json({ ok: true, url: session.url });
-  return res.status(501).json({ ok: false, error: 'Stripe integration not yet implemented' });
+  const orderId = crypto.randomUUID();
+  const now = nowSeconds();
+
+  try {
+    const npRes = await fetch('https://api.nowpayments.io/v1/invoice', {
+      method: 'POST',
+      headers: {
+        'x-api-key': NOWPAYMENTS_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        price_amount: 99,
+        price_currency: 'cad',
+        order_id: orderId,
+        order_description: 'Shift Grabber License — 1 Device Lifetime',
+        ipn_callback_url: `${SERVER_URL}/api/webhook/nowpayments`,
+        success_url: `${SERVER_URL}/success.html?payment_id=${orderId}`,
+        cancel_url: `${SERVER_URL}/`,
+      }),
+    });
+
+    const npData = await npRes.json();
+    if (!npRes.ok) {
+      console.error('[checkout] NOWPayments error:', npData);
+      return res.status(502).json({ ok: false, error: 'Payment provider error' });
+    }
+
+    // Store pending payment in our DB
+    await createPendingPayment({
+      paymentId: orderId,
+      status: 'pending',
+      licenseKey: null,
+      amountCad: '99.00',
+      createdAt: now,
+    });
+
+    return res.json({ ok: true, url: npData.invoice_url });
+  } catch (e) {
+    console.error('[checkout]', e);
+    return res.status(500).json({ ok: false, error: 'Checkout failed' });
+  }
+});
+
+// ── Payment Status (polled by success page) ──
+
+app.get('/api/payment-status', async (req, res) => {
+  const { payment_id } = req.query;
+  if (!payment_id) {
+    return res.status(400).json({ ok: false, error: 'Missing payment_id' });
+  }
+
+  try {
+    const record = await getPendingPayment(payment_id);
+    if (!record) {
+      return res.status(404).json({ ok: false, error: 'Payment not found' });
+    }
+
+    if (record.status === 'completed' && record.license_key) {
+      return res.json({ ok: true, status: 'completed', key: record.license_key });
+    }
+
+    return res.json({ ok: true, status: 'pending' });
+  } catch (e) {
+    console.error('[payment-status]', e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// ── NOWPayments Webhook ──
+
+app.post('/api/webhook/nowpayments', async (req, res) => {
+  // Always respond 200 to NOWPayments so they don't retry indefinitely
+  res.status(200).json({ received: true });
+
+  const payload = req.body || {};
+  const { payment_id, order_id, payment_status } = payload;
+
+  if (!order_id || payment_status !== 'finished') {
+    console.log('[webhook] Ignoring — status:', payment_status, 'order:', order_id);
+    return;
+  }
+
+  try {
+    // Verify with NOWPayments API that this payment is actually finished
+    const verifyRes = await fetch(`https://api.nowpayments.io/v1/payment/${payment_id}`, {
+      headers: { 'x-api-key': NOWPAYMENTS_API_KEY },
+    });
+    const verifyData = await verifyRes.json();
+    if (!verifyRes.ok || verifyData.payment_status !== 'finished') {
+      console.log('[webhook] Verification failed or not finished:', verifyData);
+      return;
+    }
+
+    // Check if we already completed this payment
+    const existing = await getPendingPayment(order_id);
+    if (!existing) {
+      console.log('[webhook] Unknown order:', order_id);
+      return;
+    }
+    if (existing.status === 'completed') {
+      console.log('[webhook] Already completed:', order_id);
+      return;
+    }
+
+    // Generate lifetime license key
+    const key = generateLicenseKey();
+    const now = nowSeconds();
+
+    await createLicense({
+      key,
+      fingerprintHash: null,
+      tier: 'basic',
+      createdAt: now,
+      expiresAt: null, // lifetime
+    });
+
+    await completePendingPayment(order_id, { licenseKey: key, completedAt: now });
+
+    console.log('[webhook] License generated for order', order_id, 'key:', key);
+  } catch (e) {
+    console.error('[webhook] Error processing payment:', e);
+  }
 });
 
 // ── Download ──

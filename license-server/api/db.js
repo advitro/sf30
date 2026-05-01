@@ -58,6 +58,17 @@ async function initPostgres() {
       created_at INTEGER
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS pending_payments (
+      id SERIAL PRIMARY KEY,
+      payment_id TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'pending',
+      license_key TEXT,
+      amount_cad TEXT,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER
+    )
+  `;
 
   return {
     async createLicense({ key, fingerprintHash, tier, createdAt, expiresAt }) {
@@ -100,6 +111,22 @@ async function initPostgres() {
     async getCustomerByLicense(key) {
       const rows = await sql`SELECT * FROM customers WHERE license_key = ${key}`;
       return rows[0] || null;
+    },
+    async createPendingPayment({ paymentId, status, licenseKey, amountCad, createdAt }) {
+      await sql`
+        INSERT INTO pending_payments (payment_id, status, license_key, amount_cad, created_at)
+        VALUES (${paymentId}, ${status}, ${licenseKey || null}, ${amountCad}, ${createdAt})
+      `;
+    },
+    async getPendingPayment(paymentId) {
+      const rows = await sql`SELECT * FROM pending_payments WHERE payment_id = ${paymentId}`;
+      return rows[0] || null;
+    },
+    async completePendingPayment(paymentId, { licenseKey, completedAt }) {
+      await sql`
+        UPDATE pending_payments SET status = 'completed', license_key = ${licenseKey}, completed_at = ${completedAt}
+        WHERE payment_id = ${paymentId}
+      `;
     },
   };
 }
@@ -144,6 +171,17 @@ async function initSQLite() {
       created_at INTEGER
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS pending_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      payment_id TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'pending',
+      license_key TEXT,
+      amount_cad TEXT,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER
+    )
+  `).run();
 
   const stmts = {
     insert: db.prepare(
@@ -161,6 +199,13 @@ async function initSQLite() {
       'INSERT INTO customers (email, stripe_customer_id, stripe_subscription_id, license_key, tier, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     ),
     findCustomerByLicense: db.prepare('SELECT * FROM customers WHERE license_key = ?'),
+    insertPendingPayment: db.prepare(
+      'INSERT INTO pending_payments (payment_id, status, license_key, amount_cad, created_at) VALUES (?, ?, ?, ?, ?)'
+    ),
+    findPendingPayment: db.prepare('SELECT * FROM pending_payments WHERE payment_id = ?'),
+    completePendingPayment: db.prepare(
+      'UPDATE pending_payments SET status = ?, license_key = ?, completed_at = ? WHERE payment_id = ?'
+    ),
   };
 
   return {
@@ -176,6 +221,11 @@ async function initSQLite() {
     createCustomer: ({ email, stripeCustomerId, stripeSubscriptionId, licenseKey, tier, createdAt }) =>
       stmts.insertCustomer.run(email, stripeCustomerId, stripeSubscriptionId, licenseKey, tier, createdAt),
     getCustomerByLicense: (key) => stmts.findCustomerByLicense.get(key) || null,
+    createPendingPayment: ({ paymentId, status, licenseKey, amountCad, createdAt }) =>
+      stmts.insertPendingPayment.run(paymentId, status, licenseKey || null, amountCad, createdAt),
+    getPendingPayment: (paymentId) => stmts.findPendingPayment.get(paymentId) || null,
+    completePendingPayment: (paymentId, { licenseKey, completedAt }) =>
+      stmts.completePendingPayment.run('completed', licenseKey, completedAt, paymentId),
   };
 }
 
@@ -215,4 +265,16 @@ export async function createCustomer(...args) {
 export async function getCustomerByLicense(...args) {
   const db = await getDb();
   return db.getCustomerByLicense(...args);
+}
+export async function createPendingPayment(...args) {
+  const db = await getDb();
+  return db.createPendingPayment(...args);
+}
+export async function getPendingPayment(...args) {
+  const db = await getDb();
+  return db.getPendingPayment(...args);
+}
+export async function completePendingPayment(...args) {
+  const db = await getDb();
+  return db.completePendingPayment(...args);
 }

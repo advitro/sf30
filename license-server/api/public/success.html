@@ -161,11 +161,11 @@
 
 <div class="container">
   <div class="card">
-    <div class="check">✓</div>
-    <h1>Payment Successful!</h1>
-    <p class="subtitle">Your license key has been generated. Save it somewhere safe — it can't be shown again.</p>
+    <div class="check" id="statusIcon">⟳</div>
+    <h1 id="statusTitle">Processing Payment...</h1>
+    <p class="subtitle" id="statusSubtitle">Please wait while we confirm your payment. This usually takes a few seconds.</p>
 
-    <div class="license-box">
+    <div class="license-box" id="keyBox" style="display:none;">
       <label>License Key</label>
       <div class="key" id="keyDisplay">Loading...</div>
       <div class="copy-row">
@@ -174,19 +174,21 @@
       </div>
     </div>
 
-    <a href="/download/shift-grabber.zip" class="btn btn-primary" download>Download Extension</a>
-    <br>
-    <a href="/" class="btn btn-ghost">Back to Home</a>
+    <div id="actionBox" style="display:none;">
+      <a href="/download/shift-grabber.zip" class="btn btn-primary" download>Download Extension</a>
+      <br>
+      <a href="/" class="btn btn-ghost">Back to Home</a>
 
-    <div class="steps">
-      <h3>How to Install</h3>
-      <ol>
-        <li>Download the ZIP file above and extract it.</li>
-        <li>Open Chrome and go to <strong>chrome://extensions</strong></li>
-        <li>Enable <strong>Developer mode</strong> (toggle top-right).</li>
-        <li>Click <strong>Load unpacked</strong> and select the extracted folder.</li>
-        <li>Click the Shift Grabber icon and enter your license key.</li>
-      </ol>
+      <div class="steps">
+        <h3>How to Install</h3>
+        <ol>
+          <li>Download the ZIP file above and extract it.</li>
+          <li>Open Chrome and go to <strong>chrome://extensions</strong></li>
+          <li>Enable <strong>Developer mode</strong> (toggle top-right).</li>
+          <li>Click <strong>Load unpacked</strong> and select the extracted folder.</li>
+          <li>Click the Shift Grabber icon and enter your license key.</li>
+        </ol>
+      </div>
     </div>
   </div>
 
@@ -201,11 +203,56 @@ function getParam(name) {
   return url.searchParams.get(name);
 }
 
-const key = getParam('key') || 'N/A';
+const paymentId = getParam('payment_id');
 const keyDisplay = document.getElementById('keyDisplay');
 const keyInput = document.getElementById('keyInput');
-keyDisplay.textContent = key;
-keyInput.value = key;
+const statusIcon = document.getElementById('statusIcon');
+const statusTitle = document.getElementById('statusTitle');
+const statusSubtitle = document.getElementById('statusSubtitle');
+const keyBox = document.getElementById('keyBox');
+const actionBox = document.getElementById('actionBox');
+
+function showKey(key) {
+  statusIcon.textContent = '✓';
+  statusTitle.textContent = 'Payment Successful!';
+  statusSubtitle.textContent = 'Your license key has been generated. Save it somewhere safe — it can\'t be shown again.';
+  keyDisplay.textContent = key;
+  keyInput.value = key;
+  keyBox.style.display = 'block';
+  actionBox.style.display = 'block';
+}
+
+function showError(msg) {
+  statusIcon.textContent = '✗';
+  statusTitle.textContent = 'Payment Failed';
+  statusSubtitle.textContent = msg || 'Something went wrong. Please contact support.';
+}
+
+async function pollStatus() {
+  if (!paymentId) {
+    showError('Missing payment ID. Please try purchasing again.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/payment-status?payment_id=' + encodeURIComponent(paymentId));
+    const data = await res.json();
+
+    if (data.status === 'completed' && data.key) {
+      showKey(data.key);
+      return;
+    }
+
+    // Still pending — poll again in 3s
+    setTimeout(pollStatus, 3000);
+  } catch (e) {
+    console.error('Poll error:', e);
+    setTimeout(pollStatus, 5000);
+  }
+}
+
+// Start polling
+pollStatus();
 
 function copyKey() {
   keyInput.select();
