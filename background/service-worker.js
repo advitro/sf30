@@ -50,9 +50,29 @@ async function getValidToken() {
   const nowSec = Math.floor(Date.now() / 1000);
   const st = await getState();
   const exp = st.sg_license_exp || 0;
-  if (exp > nowSec + 60) {
+  if (exp <= nowSec + 60) {return null;}
+
+  const validatedAt = st.sg_server_validated_at || 0;
+  const offlineValidatedAt = st.sg_offline_validated_at || 0;
+
+  // Server-validated recently → fully trusted
+  if (validatedAt > nowSec - 86400) {
     return { token: "offline", exp: exp };
   }
+
+  // Offline fallback grace period (server unreachable)
+  const grace = st.sg_offline_grace_sec || 86400;
+  const lastContact = Math.max(validatedAt, offlineValidatedAt);
+  if (lastContact > 0 && nowSec - lastContact < grace) {
+    console.warn("[SG SW] Using offline grace period — last contact:", new Date(lastContact * 1000).toISOString());
+    return { token: "offline", exp: exp };
+  }
+
+  // Legacy: never server-validated but has offline expiry (backward compat)
+  if (lastContact === 0 && exp > nowSec + 60) {
+    return { token: "offline", exp: exp };
+  }
+
   return null;
 }
 
@@ -61,21 +81,43 @@ function invalidateTokenCache() {
 }
 
 /**
- * Offline license check — verifies local expiry and device binding.
- * Replaces server heartbeat in the no-server model.
+ * Server-backed license check — validates with server, falls back to offline RSA.
  * @returns {Promise<{ok:boolean}>}
  */
 async function sendHeartbeat() {
   try {
     const st = await getState();
     const key = st[K.USER_KEY];
-    if (!key) return { ok: false, reason: "no-key" };
+    if (!key) {return { ok: false, reason: "no-key" };}
 
     const fp = await SG_FINGERPRINT.getFingerprint();
-    const result = await SG_LICENSE.validate(key, fp);
 
-    if (!result.ok) {
-      if (result.reason === "expired") {
+    // Try server validation first
+    const serverResult = await validateWithServer(key, fp);
+    if (serverResult.ok) {
+      killSwitchActive = false;
+      return { ok: true };
+    }
+
+    // Server returned explicit error (revoked, expired, mismatch) — honor it
+    if (serverResult.reason && serverResult.reason !== "server-unreachable") {
+      if (serverResult.reason === "expired" || serverResult.reason === "revoked") {
+        killSwitchActive = true;
+        await setState({ [K.ENABLED]: false, sg_kill_reason: serverResult.reason });
+        await withAlarmLock(async () => {
+          await clearAllAlarms();
+          await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
+        });
+        chrome.runtime.sendMessage({ type: "SG_KILL", reason: serverResult.reason });
+        console.warn("[SG SW] License", serverResult.reason, "— extension disabled");
+      }
+      return { ok: false, reason: serverResult.reason };
+    }
+
+    // Server unreachable — fall back to offline RSA validation
+    const offlineResult = await SG_LICENSE.validate(key, fp);
+    if (!offlineResult.ok) {
+      if (offlineResult.reason === "expired") {
         killSwitchActive = true;
         await setState({ [K.ENABLED]: false, sg_kill_reason: "license-expired" });
         await withAlarmLock(async () => {
@@ -83,9 +125,9 @@ async function sendHeartbeat() {
           await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
         });
         chrome.runtime.sendMessage({ type: "SG_KILL", reason: "license-expired" });
-        console.warn("[SG SW] License expired — extension disabled");
+        console.warn("[SG SW] License expired (offline) — extension disabled");
       }
-      return { ok: false, reason: result.reason };
+      return { ok: false, reason: offlineResult.reason };
     }
 
     killSwitchActive = false;
@@ -102,12 +144,12 @@ async function sendHeartbeat() {
  * @returns {{valid:boolean, reason?:string}}
  */
 function validateMessage(msg) {
-  if (!msg || typeof msg !== "object") return { valid: false, reason: "missing-message" };
-  if (!msg.type) return { valid: false, reason: "missing-type" };
+  if (!msg || typeof msg !== "object") {return { valid: false, reason: "missing-message" };}
+  if (!msg.type) {return { valid: false, reason: "missing-type" };}
   const schema = C.MSG_SCHEMA[msg.type];
-  if (!schema) return { valid: true }; // unknown types pass through
+  if (!schema) {return { valid: true };} // unknown types pass through
   for (const key of schema.required) {
-    if (!(key in msg)) return { valid: false, reason: "missing-field:" + key };
+    if (!(key in msg)) {return { valid: false, reason: "missing-field:" + key };}
   }
   return { valid: true };
 }
@@ -124,10 +166,10 @@ async function computeState() {
   const tok = await getValidToken();
   const hasToken = !!tok && tok.exp > nowSec;
 
-  if (!st[K.ENABLED]) return C.STATES.OFF;
-  if (!hasToken) return C.STATES.NO_KEY;
-  if (st[K.PAUSED]) return C.STATES.PAUSED;
-  if (st[K.OVERRIDE]) return C.STATES.FAST;
+  if (!st[K.ENABLED]) {return C.STATES.OFF;}
+  if (!hasToken) {return C.STATES.NO_KEY;}
+  if (st[K.PAUSED]) {return C.STATES.PAUSED;}
+  if (st[K.OVERRIDE]) {return C.STATES.FAST;}
   return C.STATES.LIVE;
 }
 
@@ -151,7 +193,7 @@ async function encryptConfig(value) {
  */
 async function decryptConfig(encrypted) {
   try {
-    if (!encrypted) return null;
+    if (!encrypted) {return null;}
     var fp = await SG_FINGERPRINT.getFingerprint();
     return await SG_CRYPTO.decrypt(encrypted, fp);
   } catch (e) { return null; }
@@ -206,13 +248,13 @@ async function flushTelegramQueue() {
   try {
     const res   = await new Promise(r => chrome.storage.local.get({ sg_tg_queue: [] }, r));
     const queue = res.sg_tg_queue || [];
-    if (queue.length === 0) return;
+    if (queue.length === 0) {return;}
     // Clear before sending — prevents double-send if SW restarts mid-flush
     await new Promise(r => chrome.storage.local.set({ sg_tg_queue: [] }, r));
     const failed = [];
     for (const item of queue) {
       const ok = await sendTelegram(item.userKey, item.date, item.time);
-      if (!ok) failed.push(item); // re-queue on Telegram API failure
+      if (!ok) {failed.push(item);} // re-queue on Telegram API failure
     }
     if (failed.length > 0) {
       // Merge back with any new items that arrived while we were flushing
@@ -228,9 +270,9 @@ async function flushTelegramQueue() {
 async function sendTelegram(userKey, date, time) {
   try {
     const optOut = await new Promise(r => chrome.storage.local.get({ sg_tg_opt_out: false }, r));
-    if (optOut.sg_tg_opt_out) return false; // user disabled Telegram notifications
+    if (optOut.sg_tg_opt_out) {return false;} // user disabled Telegram notifications
     const creds = await getTelegramCredentials();
-    if (!creds) return false; // fail silently if not configured
+    if (!creds) {return false;} // fail silently if not configured
     const text =
       `✅ <b>Shift Grabbed</b>\n` +
       `👤 <b>Key:</b> <code>${userKey}</code>\n` +
@@ -287,7 +329,7 @@ function nextFiveMinuteAnchorMinus800ms(from = new Date()) {
   d.setSeconds(0, 0);
   d.setMinutes(mins + add);
   d.setTime(d.getTime() - 800);
-  if (d.getTime() <= from.getTime()) d.setMinutes(d.getMinutes() + 5);
+  if (d.getTime() <= from.getTime()) {d.setMinutes(d.getMinutes() + 5);}
   return d;
 }
 
@@ -339,7 +381,7 @@ async function withAlarmLock(fn) {
   } finally {
     _alarmLock = false;
     const next = _alarmQueue.shift();
-    if (next) next();
+    if (next) {next();}
   }
 }
 
@@ -355,10 +397,10 @@ async function clearAllAlarms() {
 async function scheduleNextBurstAnchor() {
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || st[K.OVERRIDE] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || st[K.OVERRIDE] || st[K.PAUSED]) {return;}
   // token must be present and not expired
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   const anchor = nextFiveMinuteAnchorMinus800ms(new Date());
   await setState({ [K.NEXT_DUE]: anchor.getTime(), [K.BURST_REMAINING]: st[K.BURST_COUNT] });
@@ -368,9 +410,9 @@ async function scheduleNextBurstAnchor() {
 async function startOverrideTick() {
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || !st[K.OVERRIDE] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || !st[K.OVERRIDE] || st[K.PAUSED]) {return;}
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   const delay = jitteredDelay(st[K.BASE_MS], st[K.JITTER_MS]);
   await setState({ [K.NEXT_DUE]: Date.now() + delay, [K.BURST_REMAINING]: 0 });
@@ -382,6 +424,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // Token check alarm — runs every 2 min regardless of enabled/paused state
   if (alarm.name === "SG_TOKEN_CHECK") {
     await tryAutoRefreshTokenIfNeeded();
+    await checkRevocations();
     await flushTelegramQueue();
     return;
   }
@@ -389,19 +432,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // Heartbeat alarm — runs every 10 min
   if (alarm.name === ALARMS.HEARTBEAT) {
     await sendHeartbeat();
+    await checkRevocations();
     return;
   }
 
   const st = await getState();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!st[K.ENABLED] || st[K.PAUSED]) return;
+  if (!st[K.ENABLED] || st[K.PAUSED]) {return;}
   const tok = await getValidToken();
-  if (!tok || !tok.exp || tok.exp <= nowSec) return;
+  if (!tok || !tok.exp || tok.exp <= nowSec) {return;}
 
   await flushTelegramQueue();
 
   if (alarm.name === "SG_BURST_START") {
-    if (st[K.OVERRIDE]) return;
+    if (st[K.OVERRIDE]) {return;}
     await setState({ [K.BURST_REMAINING]: st[K.BURST_COUNT] });
     reloadAllAtoZTabs();
     const left = st[K.BURST_COUNT] - 1;
@@ -417,9 +461,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === "SG_BURST_STEP") {
     const s2 = await getState();
-    if (!s2[K.ENABLED] || s2[K.PAUSED] || s2[K.OVERRIDE]) return;
+    if (!s2[K.ENABLED] || s2[K.PAUSED] || s2[K.OVERRIDE]) {return;}
     const tok2 = await getValidToken();
-    if (!tok2 || !tok2.exp || tok2.exp <= nowSec) return;
+    if (!tok2 || !tok2.exp || tok2.exp <= nowSec) {return;}
     reloadAllAtoZTabs();
     const left = Math.max(0, (s2[K.BURST_REMAINING] || 0) - 1);
     await setState({ [K.BURST_REMAINING]: left });
@@ -434,9 +478,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === "SG_OVERRIDE_TICK") {
     const s3 = await getState();
-    if (!s3[K.ENABLED] || !s3[K.OVERRIDE] || s3[K.PAUSED]) return;
+    if (!s3[K.ENABLED] || !s3[K.OVERRIDE] || s3[K.PAUSED]) {return;}
     const tok3 = await getValidToken();
-    if (!tok3 || !tok3.exp || tok3.exp <= nowSec) return;
+    if (!tok3 || !tok3.exp || tok3.exp <= nowSec) {return;}
     reloadAllAtoZTabs();
     await startOverrideTick();
   }
@@ -444,7 +488,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Handle messages from popup / content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
+  if (!msg || !msg.type) {return;}
   // Security: validate sender is from this extension only
   if (!sender || sender.id !== chrome.runtime.id) {
     console.warn("[SG SW] Blocked message from untrusted sender:", sender?.id);
@@ -479,8 +523,8 @@ async function handleMessage(msg, sender, sendResponse) {
         await clearAllAlarms();
         const st = await getState();
         if (st[K.ENABLED]) {
-          if (st[K.OVERRIDE]) await startOverrideTick();
-          else await scheduleNextBurstAnchor();
+          if (st[K.OVERRIDE]) {await startOverrideTick();}
+          else {await scheduleNextBurstAnchor();}
         }
       });
     } else {
@@ -502,8 +546,8 @@ async function handleMessage(msg, sender, sendResponse) {
       if (ok) {
         // token must be present (popup stored token). kick off scheduling
         if (st[K.ENABLED]) {
-          if (st[K.OVERRIDE]) await startOverrideTick();
-          else await scheduleNextBurstAnchor();
+          if (st[K.OVERRIDE]) {await startOverrideTick();}
+          else {await scheduleNextBurstAnchor();}
         }
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
@@ -524,8 +568,8 @@ async function handleMessage(msg, sender, sendResponse) {
       const st = await getState();
       if (st[K.ENABLED]) {
         ensureTokenCheckAlarm();
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
@@ -539,8 +583,8 @@ async function handleMessage(msg, sender, sendResponse) {
       await clearAllAlarms();
       const st = await getState();
       if (st[K.ENABLED]) {
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       }
     });
     sendResponse && sendResponse({ ok: true });
@@ -552,8 +596,8 @@ async function handleMessage(msg, sender, sendResponse) {
       await clearAllAlarms();
       const st = await getState();
       if (st[K.ENABLED] && !st[K.PAUSED]) {
-        if (st[K.OVERRIDE]) await startOverrideTick();
-        else await scheduleNextBurstAnchor();
+        if (st[K.OVERRIDE]) {await startOverrideTick();}
+        else {await scheduleNextBurstAnchor();}
       } else {
         await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
       }
@@ -565,7 +609,7 @@ async function handleMessage(msg, sender, sendResponse) {
     const st = await getState();
     const tok = await getValidToken();
     const nowSec = Math.floor(Date.now() / 1000);
-    if (st[K.ENABLED] && !st[K.PAUSED] && tok && tok.exp > nowSec) reloadAllAtoZTabs();
+    if (st[K.ENABLED] && !st[K.PAUSED] && tok && tok.exp > nowSec) {reloadAllAtoZTabs();}
     sendResponse && sendResponse({ ok: true });
   }
 
@@ -643,48 +687,190 @@ function recordCircuitBreaker(success) {
   persistCircuitBreaker();
 }
 
-// Fetch remote config (stealth params, enabled features) from server
-async function fetchServerConfig() {
-  // No-op in offline mode — no server to fetch config from
-  return null;
+// ── Server API Helpers ──
+
+const SERVER_URL = URLS.SERVER || "";
+const PLACEHOLDER_URL = "__SG_SERVER_URL__";
+
+function serverConfigured() {
+  return SERVER_URL && SERVER_URL !== PLACEHOLDER_URL && SERVER_URL.startsWith("http");
 }
 
-// Offline license model — no server tokens to encrypt/decrypt
+/**
+ * POST /api/v2/activate — first-time activation or re-activation
+ * @returns {Promise<{ok:boolean, tier?:string, exp?:number, reason?:string}>}
+ */
+async function activateWithServer(key, fingerprintHash) {
+  if (!serverConfigured()) {return { ok: false, reason: "server-unreachable" };}
+  if (_cb.isOpen()) {return { ok: false, reason: "server-unreachable" };}
+
+  try {
+    const res = await fetch(SERVER_URL + "/api/v2/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, fingerprintHash }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const data = await res.json();
+    _cb.record(data.ok === true);
+    persistCircuitBreaker();
+
+    if (data.ok) {
+      return { ok: true, tier: data.tier, exp: data.exp };
+    }
+    // Map server errors to canonical reasons
+    const err = (data.error || "").toLowerCase();
+    if (err.includes("revoked")) {return { ok: false, reason: "revoked" };}
+    if (err.includes("expired")) {return { ok: false, reason: "expired" };}
+    if (err.includes("mismatch")) {return { ok: false, reason: "device-limit-exceeded" };}
+    if (err.includes("invalid")) {return { ok: false, reason: "invalid-key-format" };}
+    return { ok: false, reason: "validation-error" };
+  } catch (e) {
+    _cb.record(false);
+    persistCircuitBreaker();
+    console.warn("[SG SW] Server activate failed:", e.message);
+    return { ok: false, reason: "server-unreachable" };
+  }
+}
 
 /**
- * Verifies a license key with the server. Fail-closed: no self-issue fallback.
+ * POST /api/v2/validate — periodic re-verification
+ * @returns {Promise<{ok:boolean, tier?:string, exp?:number, reason?:string}>}
+ */
+async function validateWithServer(key, fingerprintHash) {
+  if (!serverConfigured()) {return { ok: false, reason: "server-unreachable" };}
+  if (_cb.isOpen()) {return { ok: false, reason: "server-unreachable" };}
+
+  try {
+    const res = await fetch(SERVER_URL + "/api/v2/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, fingerprintHash }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const data = await res.json();
+    _cb.record(data.ok === true);
+    persistCircuitBreaker();
+
+    if (data.ok) {
+      return { ok: true, tier: data.tier, exp: data.exp };
+    }
+    const err = (data.error || "").toLowerCase();
+    if (err.includes("revoked")) {return { ok: false, reason: "revoked" };}
+    if (err.includes("expired")) {return { ok: false, reason: "expired" };}
+    if (err.includes("mismatch")) {return { ok: false, reason: "device-limit-exceeded" };}
+    if (err.includes("invalid")) {return { ok: false, reason: "invalid-key-format" };}
+    return { ok: false, reason: "validation-error" };
+  } catch (e) {
+    _cb.record(false);
+    persistCircuitBreaker();
+    console.warn("[SG SW] Server validate failed:", e.message);
+    return { ok: false, reason: "server-unreachable" };
+  }
+}
+
+/**
+ * GET /api/v2/revocations — check if current key was revoked
+ * Uses ETag caching to avoid redundant transfers.
+ */
+async function checkRevocations() {
+  if (!serverConfigured()) {return;}
+  if (_cb.isOpen()) {return;}
+
+  try {
+    const st = await getState();
+    const etag = st.sg_revocation_etag || "";
+    const headers = {};
+    if (etag) {headers["If-None-Match"] = etag;}
+
+    const res = await fetch(SERVER_URL + "/api/v2/revocations", {
+      method: "GET",
+      headers: headers,
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (res.status === 304) {return;} // No changes
+
+    const data = await res.json();
+    const newEtag = data.etag || "";
+    if (newEtag) {
+      await setState({ sg_revocation_etag: newEtag });
+    }
+
+    const revokedKeys = data.revokedKeys || [];
+    const currentKey = st[K.USER_KEY];
+    if (currentKey && revokedKeys.indexOf(currentKey) !== -1) {
+      console.warn("[SG SW] Current key revoked on server — triggering kill switch");
+      killSwitchActive = true;
+      await setState({ [K.ENABLED]: false, sg_kill_reason: "revoked" });
+      await withAlarmLock(async () => {
+        await clearAllAlarms();
+        await setState({ [K.NEXT_DUE]: null, [K.BURST_REMAINING]: 0 });
+      });
+      chrome.runtime.sendMessage({ type: "SG_KILL", reason: "revoked" });
+    }
+  } catch (e) {
+    console.warn("[SG SW] Revocation check failed:", e.message);
+  }
+}
+
+// Offline license model — kept as fallback when server is unreachable
+
+/**
+ * Verifies a license key. Server-first with offline RSA fallback.
  * @param {string} key
  * @param {string} deviceId
- * @returns {Promise<{ok:boolean, reason?:string}>}
+ * @returns {Promise<{ok:boolean, reason?:string, tier?:string, exp?:number}>}
  */
 async function verifyLicense(key, deviceId) {
   try {
-    if (!key || !deviceId) return { ok: false, reason: "no-key" };
+    if (!key || !deviceId) {return { ok: false, reason: "no-key" };}
 
     var fp = await SG_FINGERPRINT.getFingerprint();
-    var result = await SG_LICENSE.validate(key, fp);
+    const nowSec = Math.floor(Date.now() / 1000);
 
-    if (!result.ok) {
-      if (result.reason === "device-limit-exceeded") {
-        await setState({
-          sg_device_limit_reason: result.reason,
-          sg_device_cooldown_days: 0
-        });
-      }
-      return result;
+    // ── Server-first validation ──
+    const serverResult = await activateWithServer(key, fp);
+    if (serverResult.ok) {
+      await setState({
+        [K.USER_KEY]: key,
+        sg_tier: serverResult.tier,
+        sg_license_exp: serverResult.exp,
+        sg_server_validated_at: nowSec,
+        sg_device_limit_reason: null,
+        sg_device_cooldown_days: 0
+      });
+      console.log("[SG SW] License verified (server) · tier:", serverResult.tier, "· expires:", new Date(serverResult.exp * 1000).toISOString());
+      return { ok: true, tier: serverResult.tier, exp: serverResult.exp };
     }
 
-    // Store license info locally
+    // Server returned explicit error — honor it, do NOT fall back
+    if (serverResult.reason && serverResult.reason !== "server-unreachable") {
+      if (serverResult.reason === "device-limit-exceeded") {
+        await setState({ sg_device_limit_reason: serverResult.reason, sg_device_cooldown_days: 0 });
+      }
+      return serverResult;
+    }
+
+    // ── Offline fallback (server unreachable) ──
+    var offlineResult = await SG_LICENSE.validate(key, fp);
+    if (!offlineResult.ok) {
+      if (offlineResult.reason === "device-limit-exceeded") {
+        await setState({ sg_device_limit_reason: offlineResult.reason, sg_device_cooldown_days: 0 });
+      }
+      return offlineResult;
+    }
+
     await setState({
       [K.USER_KEY]: key,
-      sg_tier: result.tier,
-      sg_license_exp: result.exp,
+      sg_tier: offlineResult.tier,
+      sg_license_exp: offlineResult.exp,
+      sg_offline_validated_at: nowSec,
       sg_device_limit_reason: null,
       sg_device_cooldown_days: 0
     });
-
-    console.log("[SG SW] License verified · tier:", result.tier, "· expires:", new Date(result.exp * 1000).toISOString());
-    return { ok: true, tier: result.tier, exp: result.exp };
+    console.log("[SG SW] License verified (offline fallback) · tier:", offlineResult.tier);
+    return { ok: true, tier: offlineResult.tier, exp: offlineResult.exp };
   } catch (e) {
     console.error("[SG SW] License verification error:", e);
     return { ok: false, reason: "validation-error" };
@@ -727,7 +913,7 @@ async function tryAutoRefreshTokenIfNeeded() {
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = st.sg_license_exp || 0;
   const key = st[K.USER_KEY] || "";
-  if (!key || exp - nowSec > 300) return; // not expiring soon
+  if (!key || exp - nowSec > 300) {return;} // not expiring soon
   const ok = await refreshTokenInBackground();
   if (!ok) {
     chrome.runtime.sendMessage({ type: "SG_REQUEST_TOKEN_REFRESH" }, () => {});
@@ -741,7 +927,7 @@ async function tryAutoRefreshTokenIfNeeded() {
  */
 function ensureTokenCheckAlarm() {
   chrome.alarms.get(ALARMS.TOKEN_CHECK, (alarm) => {
-    if (!alarm) chrome.alarms.create(ALARMS.TOKEN_CHECK, { delayInMinutes: 1, periodInMinutes: 2 });
+    if (!alarm) {chrome.alarms.create(ALARMS.TOKEN_CHECK, { delayInMinutes: 1, periodInMinutes: 2 });}
   });
 }
 
@@ -750,7 +936,7 @@ function ensureTokenCheckAlarm() {
  */
 function ensureHeartbeatAlarm() {
   chrome.alarms.get(ALARMS.HEARTBEAT, (alarm) => {
-    if (!alarm) chrome.alarms.create(ALARMS.HEARTBEAT, { delayInMinutes: 2, periodInMinutes: 10 });
+    if (!alarm) {chrome.alarms.create(ALARMS.HEARTBEAT, { delayInMinutes: 2, periodInMinutes: 10 });}
   });
 }
 
@@ -790,12 +976,12 @@ chrome.runtime.onStartup.addListener(async () => {
   });
   await flushTelegramQueue();
   const st     = await getState();
-  const cached = await loadEncryptedToken();
+  const cached = await getValidToken();
   const nowSec = Math.floor(Date.now() / 1000);
   await withAlarmLock(async () => {
     if (st[K.ENABLED] && !st[K.PAUSED] && cached.token && cached.exp > nowSec) {
-      if (st[K.OVERRIDE]) await startOverrideTick();
-      else await scheduleNextBurstAnchor();
+      if (st[K.OVERRIDE]) {await startOverrideTick();}
+      else {await scheduleNextBurstAnchor();}
     }
   });
 });
