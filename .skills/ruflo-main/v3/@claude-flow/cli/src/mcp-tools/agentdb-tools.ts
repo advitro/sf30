@@ -12,6 +12,7 @@
  */
 
 import type { MCPTool } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 
 // ===== Shared validation helpers =====
 
@@ -116,6 +117,9 @@ export const agentdbPatternStore: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vPattern = validateText(params.pattern, 'pattern', 100_000);
+      if (!vPattern.valid) return { success: false, error: vPattern.error };
+      if (params.type) { const vType = validateIdentifier(params.type, 'type'); if (!vType.valid) return { success: false, error: vType.error }; }
       const pattern = validateString(params.pattern, 'pattern');
       if (!pattern) return { success: false, error: 'pattern is required (non-empty string, max 100KB)' };
       const bridge = await getBridge();
@@ -147,6 +151,8 @@ export const agentdbPatternSearch: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vQuery = validateText(params.query, 'query', 10_000);
+      if (!vQuery.valid) return { results: [], error: vQuery.error };
       const query = validateString(params.query, 'query', 10_000);
       if (!query) return { results: [], error: 'query is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();
@@ -179,6 +185,9 @@ export const agentdbFeedback: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vTaskId = validateIdentifier(params.taskId, 'taskId');
+      if (!vTaskId.valid) return { success: false, error: vTaskId.error };
+      if (params.agent) { const vAgent = validateIdentifier(params.agent, 'agent'); if (!vAgent.valid) return { success: false, error: vAgent.error }; }
       const taskId = validateString(params.taskId, 'taskId', 500);
       if (!taskId) return { success: false, error: 'taskId is required (non-empty string, max 500 chars)' };
       const bridge = await getBridge();
@@ -212,12 +221,35 @@ export const agentdbCausalEdge: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vSourceId = validateIdentifier(params.sourceId, 'sourceId');
+      if (!vSourceId.valid) return { success: false, error: vSourceId.error };
+      const vTargetId = validateIdentifier(params.targetId, 'targetId');
+      if (!vTargetId.valid) return { success: false, error: vTargetId.error };
+      const vRelation = validateIdentifier(params.relation, 'relation');
+      if (!vRelation.valid) return { success: false, error: vRelation.error };
       const sourceId = validateString(params.sourceId, 'sourceId', 500);
       const targetId = validateString(params.targetId, 'targetId', 500);
       const relation = validateString(params.relation, 'relation', 200);
       if (!sourceId) return { success: false, error: 'sourceId is required (non-empty string)' };
       if (!targetId) return { success: false, error: 'targetId is required (non-empty string)' };
       if (!relation) return { success: false, error: 'relation is required (non-empty string)' };
+      // Try native graph-node backend first (ADR-087)
+      try {
+        const graphBackend = await import('../ruvector/graph-backend.js');
+        if (await graphBackend.isGraphBackendAvailable()) {
+          const graphResult = await graphBackend.recordCausalEdge(
+            sourceId, targetId, relation,
+            typeof params.weight === 'number' ? validateScore(params.weight, 0.5) : undefined,
+          );
+          if (graphResult.success) {
+            // Also record in AgentDB bridge for compatibility
+            const bridge = await getBridge();
+            await bridge.bridgeRecordCausalEdge({ sourceId, targetId, relation, weight: typeof params.weight === 'number' ? validateScore(params.weight, 0.5) : undefined }).catch(() => {});
+            return { ...graphResult, _graphNodeBackend: true };
+          }
+        }
+      } catch { /* graph-node not available, fall through */ }
+
       const bridge = await getBridge();
       const result = await bridge.bridgeRecordCausalEdge({
         sourceId,
@@ -247,6 +279,9 @@ export const agentdbRoute: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vTask = validateText(params.task, 'task', 10_000);
+      if (!vTask.valid) return { route: 'general', confidence: 0.5, agents: ['coder'], controller: 'error', error: vTask.error };
+      if (params.context) { const vCtx = validateText(params.context, 'context', 10_000); if (!vCtx.valid) return { route: 'general', confidence: 0.5, agents: ['coder'], controller: 'error', error: vCtx.error }; }
       const task = validateString(params.task, 'task', 10_000);
       if (!task) return { route: 'general', confidence: 0.5, agents: ['coder'], controller: 'error', error: 'task is required (non-empty string)' };
       const bridge = await getBridge();
@@ -276,6 +311,9 @@ export const agentdbSessionStart: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vSessionId = validateIdentifier(params.sessionId, 'sessionId');
+      if (!vSessionId.valid) return { success: false, error: vSessionId.error };
+      if (params.context) { const vCtx = validateText(params.context, 'context', 10_000); if (!vCtx.valid) return { success: false, error: vCtx.error }; }
       const sessionId = validateString(params.sessionId, 'sessionId', 500);
       if (!sessionId) return { success: false, error: 'sessionId is required (non-empty string)' };
       const bridge = await getBridge();
@@ -306,6 +344,9 @@ export const agentdbSessionEnd: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vSessionId = validateIdentifier(params.sessionId, 'sessionId');
+      if (!vSessionId.valid) return { success: false, error: vSessionId.error };
+      if (params.summary) { const vSummary = validateText(params.summary, 'summary', 50_000); if (!vSummary.valid) return { success: false, error: vSummary.error }; }
       const sessionId = validateString(params.sessionId, 'sessionId', 500);
       if (!sessionId) return { success: false, error: 'sessionId is required (non-empty string)' };
       const bridge = await getBridge();
@@ -342,6 +383,11 @@ export const agentdbHierarchicalStore: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vKey = validateIdentifier(params.key, 'key');
+      if (!vKey.valid) return { success: false, error: vKey.error };
+      const vValue = validateText(params.value, 'value');
+      if (!vValue.valid) return { success: false, error: vValue.error };
+      if (params.tier) { const vTier = validateIdentifier(params.tier, 'tier'); if (!vTier.valid) return { success: false, error: vTier.error }; }
       const key = validateString(params.key, 'key', 1000);
       const value = validateString(params.value, 'value');
       if (!key) return { success: false, error: 'key is required (non-empty string, max 1KB)' };
@@ -375,6 +421,9 @@ export const agentdbHierarchicalRecall: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vQuery = validateText(params.query, 'query', 10_000);
+      if (!vQuery.valid) return { results: [], error: vQuery.error };
+      if (params.tier) { const vTier = validateIdentifier(params.tier, 'tier'); if (!vTier.valid) return { results: [], error: vTier.error }; }
       const query = validateString(params.query, 'query', 10_000);
       if (!query) return { results: [], error: 'query is required (non-empty string, max 10KB)' };
       const tier = validateString(params.tier, 'tier', 20);
@@ -424,7 +473,7 @@ export const agentdbConsolidate: MCPTool = {
 
 export const agentdbBatch: MCPTool = {
   name: 'agentdb_batch',
-  description: 'Batch operations on memory entries (insert, update, delete)',
+  description: 'Batch operations on AgentDB episodes (insert, update, delete). Note: entries are stored in the AgentDB episodes table, not the memory_search namespace. Use memory_store for entries that should be searchable via memory_search.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -450,6 +499,8 @@ export const agentdbBatch: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vOp = validateIdentifier(params.operation, 'operation');
+      if (!vOp.valid) return { success: false, error: vOp.error };
       const operation = validateString(params.operation, 'operation', 20);
       if (!operation) return { success: false, error: 'operation is required (string)' };
       if (!['insert', 'update', 'delete'].includes(operation)) {
@@ -500,6 +551,8 @@ export const agentdbContextSynthesize: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vQuery = validateText(params.query, 'query', 10_000);
+      if (!vQuery.valid) return { success: false, error: vQuery.error };
       const query = validateString(params.query, 'query', 10_000);
       if (!query) return { success: false, error: 'query is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();
@@ -528,6 +581,8 @@ export const agentdbSemanticRoute: MCPTool = {
   },
   handler: async (params: Record<string, unknown>) => {
     try {
+      const vInput = validateText(params.input, 'input', 10_000);
+      if (!vInput.valid) return { route: null, error: vInput.error };
       const input = validateString(params.input, 'input', 10_000);
       if (!input) return { route: null, error: 'input is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();

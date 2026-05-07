@@ -65,7 +65,7 @@ const startCommand: Command = {
         }
       }
       if (thresholds.maxCpuLoad !== undefined || thresholds.minFreeMemoryPercent !== undefined) {
-        config.resourceThresholds = thresholds as any;
+        config.resourceThresholds = thresholds as DaemonConfig['resourceThresholds'];
       }
     }
 
@@ -74,10 +74,12 @@ const startCommand: Command = {
       const bgPid = getBackgroundDaemonPid(projectRoot);
       if (bgPid && isProcessRunning(bgPid)) {
         if (!quiet) {
-          output.printWarning(`Daemon already running in background (PID: ${bgPid})`);
+          output.printWarning(`Daemon already running in background (PID: ${bgPid}). Stop it first with: daemon stop`);
         }
         return { success: true };
       }
+      // #1551: Kill any stale daemon processes that weren't tracked by PID file
+      await killStaleDaemons(projectRoot, quiet);
     }
 
     // Background mode (default): fork a detached process
@@ -95,8 +97,9 @@ const startCommand: Command = {
         fs.mkdirSync(stateDir, { recursive: true });
       }
 
-      // Write PID file for foreground mode
-      fs.writeFileSync(pidFile, String(process.pid));
+      // NOTE: Do NOT write PID file here — startDaemon() writes it internally.
+      // Writing it before startDaemon() causes checkExistingDaemon() to detect
+      // our own PID and return early, leaving no workers scheduled (#1478 Bug 1).
 
       // Clean up PID file on exit
       const cleanup = () => {
@@ -173,10 +176,13 @@ const startCommand: Command = {
           output.writeln(output.error(`[daemon] Worker failed: ${type} - ${error}`));
         });
 
-        // Keep process alive
+        // Keep process alive — setInterval creates a ref'd handle that prevents
+        // Node.js from exiting even when startDaemon's timers are unref'd (#1478 Bug 2).
+        setInterval(() => {}, 60_000);
         await new Promise(() => {}); // Never resolves - daemon runs until killed
       } else {
         await startDaemon(projectRoot, config);
+        setInterval(() => {}, 60_000); // Keep alive with ref'd handle (#1478)
         await new Promise(() => {}); // Keep alive
       }
 
@@ -252,10 +258,13 @@ async function startBackgroundDaemon(projectRoot: string, quiet: boolean, maxCpu
 
   // Platform-aware spawn flags
   const isWin = process.platform === 'win32';
-  const spawnOpts: any = {
+  const spawnOpts: Record<string, unknown> = {
     cwd: resolvedRoot,
     detached: !isWin,  // detached is POSIX-only; Windows uses windowsHide
-    stdio: ['ignore', fs.openSync(logFile, 'a'), fs.openSync(logFile, 'a')],
+    // Use 'ignore' for all stdio — passing fs.openSync() FDs causes the child to
+    // die on Windows when the parent exits and closes the FDs (#1478 Bug 3).
+    // The daemon writes its own logs via appendFileSync to .claude-flow/logs/.
+    stdio: ['ignore', 'ignore', 'ignore'],
     env: {
       ...process.env,
       CLAUDE_FLOW_DAEMON: '1',
@@ -294,11 +303,17 @@ async function startBackgroundDaemon(projectRoot: string, quiet: boolean, maxCpu
   // but child hasn't fully detached yet (fixes macOS daemon death #1283)
   child.unref();
 
-  // Small delay to let the child process fully detach on macOS
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Longer delay to let the child process start and write its own PID file.
+  // 100ms was too short on Windows; the child's checkExistingDaemon() would
+  // find the parent-written PID and return early (#1478 Bug 1).
+  await new Promise(resolve => setTimeout(resolve, 500));
 
-  // Save PID only after child is detached
-  fs.writeFileSync(pidFile, String(pid));
+  // Write PID file only if the child hasn't already written its own.
+  // The foreground child calls writePidFile() internally, but on some platforms
+  // it may not have started yet, so we write as a fallback.
+  if (!fs.existsSync(pidFile)) {
+    fs.writeFileSync(pidFile, String(pid));
+  }
 
   if (!quiet) {
     output.printSuccess(`Daemon started in background (PID: ${pid})`);
@@ -334,10 +349,14 @@ const stopCommand: Command = {
         // Also kill any background daemon by PID
         const killed = await killBackgroundDaemon(projectRoot);
 
+        // #1551: Also kill stale daemon processes not tracked by PID file
+        await killStaleDaemons(projectRoot, true);
+
         spinner.succeed(killed ? 'Worker daemon stopped' : 'Worker daemon was not running');
       } else {
         await stopDaemon();
         await killBackgroundDaemon(projectRoot);
+        await killStaleDaemons(projectRoot, true);
       }
 
       return { success: true };
@@ -401,6 +420,43 @@ async function killBackgroundDaemon(projectRoot: string): Promise<boolean> {
       fs.unlinkSync(pidFile);
     }
     return false;
+  }
+}
+
+/**
+ * Kill stale daemon processes not tracked by the PID file (#1551).
+ * Uses `ps` to find all daemon processes for this project and kills them.
+ */
+async function killStaleDaemons(projectRoot: string, quiet: boolean): Promise<void> {
+  try {
+    const { execFileSync } = await import('child_process');
+    const psOutput = execFileSync('ps', ['-eo', 'pid,command'], { encoding: 'utf-8', timeout: 5000 });
+    const lines = psOutput.split('\n');
+    const currentPid = process.pid;
+    const trackedPid = getBackgroundDaemonPid(projectRoot);
+    let killed = 0;
+
+    for (const line of lines) {
+      if (!line.includes('daemon start --foreground')) continue;
+      if (!line.includes('claude-flow') && !line.includes('@claude-flow/cli')) continue;
+      const pidStr = line.trim().split(/\s+/)[0];
+      const pid = parseInt(pidStr, 10);
+      if (isNaN(pid) || pid === currentPid || pid === trackedPid) continue;
+      if (!isProcessRunning(pid)) continue;
+      try {
+        process.kill(pid, 'SIGTERM');
+        killed++;
+        if (!quiet) {
+          output.printWarning(`Killed stale daemon process (PID: ${pid})`);
+        }
+      } catch { /* ignore — may have exited between check and kill */ }
+    }
+
+    if (killed > 0 && !quiet) {
+      output.printInfo(`Cleaned up ${killed} stale daemon process(es)`);
+    }
+  } catch {
+    // ps not available or failed — skip stale cleanup
   }
 }
 
@@ -489,8 +545,8 @@ const statusCommand: Command = {
       const workerData = status.config.workers.map(w => {
         const state = status.workers.get(w.type);
         // Check for headless mode from worker config or state
-        const isHeadless = (w as any).headless || (state as any)?.headless || false;
-        const sandboxMode = (w as any).sandbox || (state as any)?.sandbox || null;
+        const isHeadless = (w as unknown as Record<string, unknown>).headless || (state as unknown as Record<string, unknown> | undefined)?.headless || false;
+        const sandboxMode = (w as unknown as Record<string, unknown>).sandbox || (state as unknown as Record<string, unknown> | undefined)?.sandbox || null;
         return {
           type: w.enabled ? output.highlight(w.type) : output.dim(w.type),
           enabled: w.enabled ? output.success('✓') : output.dim('○'),

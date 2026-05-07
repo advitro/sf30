@@ -37,7 +37,14 @@ async function initCodexAction(
 
   try {
     // Dynamic import of the Codex initializer with lazy loading fallback
-    let CodexInitializer: any;
+    interface CodexInitResult {
+      success: boolean;
+      errors?: string[];
+      filesCreated: string[];
+      skillsGenerated: string[];
+      warnings?: string[];
+    }
+    let CodexInitializer: (new () => { initialize: (options: Record<string, unknown>) => Promise<CodexInitResult> }) | undefined;
 
     // Try multiple resolution strategies for the @claude-flow/codex package
     // Use a variable to prevent TypeScript from statically resolving the optional module
@@ -378,21 +385,30 @@ const initAction = async (ctx: CommandContext): Promise<CommandResult> => {
 
     // Handle --with-embeddings
     const withEmbeddings = ctx.flags['with-embeddings'] || ctx.flags.withEmbeddings;
-    const embeddingModel = (ctx.flags['embedding-model'] || ctx.flags.embeddingModel || 'all-MiniLM-L6-v2') as string;
+    const embeddingModel = (ctx.flags['embedding-model'] || ctx.flags.embeddingModel || 'Xenova/all-MiniLM-L6-v2') as string;
 
     if (withEmbeddings) {
       output.writeln();
       output.printInfo('Initializing ONNX embedding subsystem...');
 
-      const { execSync } = await import('child_process');
+      const { execFileSync: execFileInit } = await import('child_process');
+
+      // Validate embeddingModel: must match pattern org/model-name (CRIT-02)
+      if (!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+$/.test(embeddingModel)) {
+        throw new Error(`Invalid embedding model name: ${embeddingModel}`);
+      }
 
       try {
         output.writeln(output.dim(`  Model: ${embeddingModel}`));
         output.writeln(output.dim('  Hyperbolic: Enabled (Poincaré ball)'));
-        execSync(`npx @claude-flow/cli@latest embeddings init --model ${embeddingModel} --no-download --force 2>/dev/null`, {
+        execFileInit('npx', [
+          '@claude-flow/cli@latest', 'embeddings', 'init',
+          '--model', embeddingModel,
+          '--no-download', '--force',
+        ], {
           stdio: 'pipe',
           cwd: ctx.cwd,
-          timeout: 30000
+          timeout: 30000,
         });
         output.writeln(output.success('  ✓ Embeddings initialized'));
         output.writeln(output.dim('    Run "embeddings init --download" to download model'));
@@ -402,13 +418,13 @@ const initAction = async (ctx: CommandContext): Promise<CommandResult> => {
     }
 
     if (!startDaemon && !startAll) {
-      // Next steps (only if not auto-starting)
+      const bin = (process.argv[1] || '').includes('ruflo') ? 'ruflo' : 'claude-flow';
       output.writeln(output.bold('Next steps:'));
       output.printList([
-        `Run ${output.highlight('claude-flow daemon start')} to start background workers`,
-        `Run ${output.highlight('claude-flow memory init')} to initialize memory database`,
-        `Run ${output.highlight('claude-flow swarm init')} to initialize a swarm`,
-        `Or use ${output.highlight('claude-flow init --start-all')} to do all of the above`,
+        `Run ${output.highlight(`${bin} daemon start`)} to start background workers`,
+        `Run ${output.highlight(`${bin} memory init`)} to initialize memory database`,
+        `Run ${output.highlight(`${bin} swarm init`)} to initialize a swarm`,
+        `Or use ${output.highlight(`${bin} init --start-all`)} to do all of the above`,
         options.components.settings ? `Review ${output.highlight('.claude/settings.json')} for hook configurations` : '',
       ].filter(Boolean));
     }
@@ -599,13 +615,13 @@ const wizardCommand: Command = {
         default: true,
       });
 
-      let embeddingModel = 'all-MiniLM-L6-v2';
+      let embeddingModel = 'Xenova/all-MiniLM-L6-v2';
       if (enableEmbeddings) {
         embeddingModel = await select({
           message: 'Select embedding model:',
           options: [
-            { value: 'all-MiniLM-L6-v2', label: 'MiniLM L6 (384d)', hint: 'Fast, good quality (recommended)' },
-            { value: 'all-mpnet-base-v2', label: 'MPNet Base (768d)', hint: 'Higher quality, more memory' },
+            { value: 'Xenova/all-MiniLM-L6-v2', label: 'MiniLM L6 (384d)', hint: 'Fast, good quality (recommended)' },
+            { value: 'Xenova/all-mpnet-base-v2', label: 'MPNet Base (768d)', hint: 'Higher quality, more memory' },
           ],
         });
       }
@@ -632,12 +648,22 @@ const wizardCommand: Command = {
       if (enableEmbeddings) {
         output.writeln();
         output.printInfo('Initializing ONNX embedding subsystem...');
-        const { execSync } = await import('child_process');
+        const { execFileSync } = await import('child_process');
+
+        // Validate embeddingModel: must match pattern org/model-name (CRIT-02)
+        if (!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+$/.test(embeddingModel)) {
+          throw new Error(`Invalid embedding model name: ${embeddingModel}`);
+        }
+
         try {
-          execSync(`npx @claude-flow/cli@latest embeddings init --model ${embeddingModel} --no-download --force 2>/dev/null`, {
+          execFileSync('npx', [
+            '@claude-flow/cli@latest', 'embeddings', 'init',
+            '--model', embeddingModel,
+            '--no-download', '--force',
+          ], {
             stdio: 'pipe',
             cwd: ctx.cwd,
-            timeout: 30000
+            timeout: 30000,
           });
           output.writeln(output.success('  ✓ Embeddings configured'));
           embeddingsInitialized = true;
@@ -1059,8 +1085,8 @@ export const initCommand: Command = {
       name: 'embedding-model',
       description: 'ONNX embedding model to use',
       type: 'string',
-      default: 'all-MiniLM-L6-v2',
-      choices: ['all-MiniLM-L6-v2', 'all-mpnet-base-v2'],
+      default: 'Xenova/all-MiniLM-L6-v2',
+      choices: ['Xenova/all-MiniLM-L6-v2', 'Xenova/all-mpnet-base-v2'],
     },
     {
       name: 'codex',
@@ -1086,7 +1112,7 @@ export const initCommand: Command = {
     { command: 'claude-flow init --skip-claude', description: 'Only create V3 runtime' },
     { command: 'claude-flow init wizard', description: 'Interactive setup wizard' },
     { command: 'claude-flow init --with-embeddings', description: 'Initialize with ONNX embeddings' },
-    { command: 'claude-flow init --with-embeddings --embedding-model all-mpnet-base-v2', description: 'Use larger embedding model' },
+    { command: 'claude-flow init --with-embeddings --embedding-model Xenova/all-mpnet-base-v2', description: 'Use larger embedding model' },
     { command: 'claude-flow init skills --all', description: 'Install all available skills' },
     { command: 'claude-flow init hooks --minimal', description: 'Create minimal hooks configuration' },
     { command: 'claude-flow init upgrade', description: 'Update helpers while preserving data' },

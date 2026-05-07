@@ -157,6 +157,13 @@ ${workerTypes.map(type => `• ${type}: ${workerGroups[type].length} agents`).jo
 🎯 YOUR OBJECTIVE:
 ${objective}
 
+⚠️ CRITICAL — TOOL PREFERENCE RULES (#1422):
+• You MUST use Ruflo MCP tools (mcp__ruflo__*) for ALL orchestration tasks
+• Do NOT use Claude native Task/Agent tools for swarm coordination — use mcp__ruflo__agent_spawn, mcp__ruflo__task_assign, etc.
+• Native Claude tools (Read, Write, Edit, Bash, Grep, Glob) should ONLY be used for file operations and shell commands
+• All agent spawning, task assignment, memory, and coordination MUST go through mcp__ruflo__* tools
+• If a Ruflo MCP tool exists for an operation, always prefer it over any native equivalent
+
 💡 COORDINATION TIPS:
 • Use mcp__ruflo__hive-mind_broadcast for swarm-wide announcements
 • Check worker status regularly with mcp__ruflo__hive-mind_status
@@ -251,8 +258,10 @@ async function spawnClaudeCodeInstance(
         output.printInfo('Running in non-interactive mode');
       }
 
-      // Add auto-permission flag unless explicitly disabled
-      const skipPermissions = flags['dangerously-skip-permissions'] !== false && !flags['no-auto-permissions'];
+      // HIGH-02: Strict boolean check (=== true) instead of loose truthiness (!== false)
+      // to prevent undefined/null from being treated as "skip permissions".
+      // Behavior change: only explicit --dangerously-skip-permissions flag triggers skip.
+      const skipPermissions = flags['dangerously-skip-permissions'] === true && !flags['no-auto-permissions'];
       if (skipPermissions) {
         claudeArgs.push('--dangerously-skip-permissions');
         if (!isNonInteractive) {

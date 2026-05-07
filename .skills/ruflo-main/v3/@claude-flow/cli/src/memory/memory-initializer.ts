@@ -388,14 +388,14 @@ export async function getHNSWIndex(options?: {
 
     const { VectorDb } = ruvectorCore;
 
-    // Persistent storage paths
-    const swarmDir = path.join(process.cwd(), '.swarm');
+    // Persistent storage paths — resolve to absolute to survive CWD changes
+    const swarmDir = path.resolve(process.cwd(), '.swarm');
     if (!fs.existsSync(swarmDir)) {
       fs.mkdirSync(swarmDir, { recursive: true });
     }
     const hnswPath = path.join(swarmDir, 'hnsw.index');
     const metadataPath = path.join(swarmDir, 'hnsw.metadata.json');
-    const dbPath = options?.dbPath || path.join(swarmDir, 'memory.db');
+    const dbPath = options?.dbPath ? path.resolve(options.dbPath) : path.join(swarmDir, 'memory.db');
 
     // Create HNSW index with persistent storage
     // @ruvector/core uses string enum for distanceMetric: 'Cosine', 'Euclidean', 'DotProduct', 'Manhattan'
@@ -1557,7 +1557,7 @@ export async function loadEmbeddingModel(options?: {
       return {
         success: true,
         dimensions: 384,
-        modelName: 'all-MiniLM-L6-v2',
+        modelName: 'Xenova/all-MiniLM-L6-v2',
         loadTime: Date.now() - startTime
       };
     }
@@ -2043,7 +2043,19 @@ export async function storeEntry(options: {
   const bridge = await getBridge();
   if (bridge) {
     const bridgeResult = await bridge.bridgeStoreEntry(options);
-    if (bridgeResult) return bridgeResult;
+    if (bridgeResult) {
+      // Keep HNSW index in sync with bridge-stored entries
+      if (bridgeResult.rawEmbedding && bridgeResult.success) {
+        const ns = options.namespace || 'default';
+        await addToHNSWIndex(bridgeResult.id, bridgeResult.rawEmbedding, {
+          id: bridgeResult.id,
+          key: options.key,
+          namespace: ns,
+          content: options.value,
+        }).catch(() => {});
+      }
+      return bridgeResult;
+    }
   }
 
   // Fallback: raw sql.js
@@ -2058,8 +2070,8 @@ export async function storeEntry(options: {
     upsert = false
   } = options;
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
-  const dbPath = customPath || path.join(swarmDir, 'memory.db');
+  const swarmDir = path.resolve(process.cwd(), '.swarm');
+  const dbPath = customPath ? path.resolve(customPath) : path.join(swarmDir, 'memory.db');
 
   try {
     if (!fs.existsSync(dbPath)) {
@@ -2180,14 +2192,15 @@ export async function searchEntries(options: {
   // Fallback: raw sql.js
   const {
     query,
-    namespace = 'default',
+    namespace,
     limit = 10,
     threshold = 0.3,
     dbPath: customPath
   } = options;
+  const effectiveNamespace = namespace || 'all';
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
-  const dbPath = customPath || path.join(swarmDir, 'memory.db');
+  const swarmDir = path.resolve(process.cwd(), '.swarm');
+  const dbPath = customPath ? path.resolve(customPath) : path.join(swarmDir, 'memory.db');
   const startTime = Date.now();
 
   try {
@@ -2202,8 +2215,53 @@ export async function searchEntries(options: {
     const queryEmb = await generateEmbedding(query);
     const queryEmbedding = queryEmb.embedding;
 
-    // Try HNSW search first (150x faster)
-    const hnswResults = await searchHNSWIndex(queryEmbedding, { k: limit, namespace });
+    // Try RaBitQ pre-filter first (32× compressed Hamming scan)
+    try {
+      const { searchRabitq } = await import('./rabitq-index.js');
+      const rabitqCandidates = await searchRabitq(queryEmbedding, { k: limit * 2, namespace: effectiveNamespace });
+      if (rabitqCandidates && rabitqCandidates.length > 0) {
+        // Rerank candidates with exact cosine similarity from SQLite
+        const initSqlJs = (await import('sql.js')).default;
+        const SQL = await initSqlJs();
+        const fileBuffer = fs.readFileSync(dbPath);
+        const db = new SQL.Database(fileBuffer);
+        const reranked: { id: string; key: string; content: string; score: number; namespace: string }[] = [];
+
+        for (const candidate of rabitqCandidates) {
+          const stmt = db.prepare('SELECT content, embedding FROM memory_entries WHERE id = ? AND status = ?');
+          stmt.bind([candidate.id, 'active']);
+          if (stmt.step()) {
+            const [content, embeddingJson] = stmt.get() as [string, string | null];
+            let score = 0;
+            if (embeddingJson) {
+              try {
+                const embedding = JSON.parse(embeddingJson) as number[];
+                score = cosineSim(queryEmbedding, embedding);
+              } catch { /* skip */ }
+            }
+            if (score >= threshold) {
+              reranked.push({
+                id: candidate.id.substring(0, 12),
+                key: candidate.key || candidate.id.substring(0, 15),
+                content: (content || '').substring(0, 60) + ((content || '').length > 60 ? '...' : ''),
+                score,
+                namespace: candidate.namespace,
+              });
+            }
+          }
+          stmt.free();
+        }
+        db.close();
+
+        if (reranked.length > 0) {
+          reranked.sort((a, b) => b.score - a.score);
+          return { success: true, results: reranked.slice(0, limit), searchTime: Date.now() - startTime };
+        }
+      }
+    } catch { /* RaBitQ unavailable, fall through */ }
+
+    // Try HNSW search (150x faster than brute-force)
+    const hnswResults = await searchHNSWIndex(queryEmbedding, { k: limit, namespace: effectiveNamespace });
     if (hnswResults && hnswResults.length > 0) {
       // Filter by threshold
       const filtered = hnswResults.filter(r => r.score >= threshold);
@@ -2223,12 +2281,12 @@ export async function searchEntries(options: {
 
     // Get entries with embeddings
     const searchStmt = db.prepare(
-      namespace !== 'all'
+      effectiveNamespace !== 'all'
         ? `SELECT id, key, namespace, content, embedding FROM memory_entries WHERE status = 'active' AND namespace = ? LIMIT 1000`
         : `SELECT id, key, namespace, content, embedding FROM memory_entries WHERE status = 'active' LIMIT 1000`
     );
-    if (namespace !== 'all') {
-      searchStmt.bind([namespace]);
+    if (effectiveNamespace !== 'all') {
+      searchStmt.bind([effectiveNamespace]);
     }
     const searchRows: unknown[][] = [];
     while (searchStmt.step()) {
@@ -2595,7 +2653,22 @@ export async function deleteEntry(options: {
   const bridge = await getBridge();
   if (bridge) {
     const bridgeResult = await bridge.bridgeDeleteEntry(options);
-    if (bridgeResult) return bridgeResult;
+    if (bridgeResult) {
+      // #1122: Bridge path must also invalidate the in-memory HNSW index.
+      // Without this, deleted vectors remain as ghost entries in search results.
+      if (bridgeResult.deleted && hnswIndex?.entries) {
+        // Remove the entry from the HNSW entries map by key+namespace composite
+        for (const [id, entry] of hnswIndex.entries) {
+          if ((entry as any)?.key === options.key && ((entry as any)?.namespace ?? 'default') === (options.namespace ?? 'default')) {
+            hnswIndex.entries.delete(id);
+            break;
+          }
+        }
+        saveHNSWMetadata();
+        rebuildSearchIndex();
+      }
+      return bridgeResult;
+    }
   }
 
   // Fallback: raw sql.js

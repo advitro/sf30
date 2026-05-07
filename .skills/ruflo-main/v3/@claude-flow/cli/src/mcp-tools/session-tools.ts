@@ -6,7 +6,8 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -31,7 +32,7 @@ interface SessionRecord {
 }
 
 function getSessionDir(): string {
-  return join(process.cwd(), STORAGE_DIR, SESSION_DIR);
+  return join(getProjectCwd(), STORAGE_DIR, SESSION_DIR);
 }
 
 function getSessionPath(sessionId: string): string {
@@ -89,7 +90,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeMemory) {
     try {
-      const memoryPath = join(process.cwd(), STORAGE_DIR, 'memory', 'store.json');
+      const memoryPath = join(getProjectCwd(), STORAGE_DIR, 'memory', 'store.json');
       if (existsSync(memoryPath)) {
         data.memory = JSON.parse(readFileSync(memoryPath, 'utf-8'));
       }
@@ -98,7 +99,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeTasks) {
     try {
-      const taskPath = join(process.cwd(), STORAGE_DIR, 'tasks', 'store.json');
+      const taskPath = join(getProjectCwd(), STORAGE_DIR, 'tasks', 'store.json');
       if (existsSync(taskPath)) {
         data.tasks = JSON.parse(readFileSync(taskPath, 'utf-8'));
       }
@@ -107,7 +108,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeAgents) {
     try {
-      const agentPath = join(process.cwd(), STORAGE_DIR, 'agents', 'store.json');
+      const agentPath = join(getProjectCwd(), STORAGE_DIR, 'agents', 'store.json');
       if (existsSync(agentPath)) {
         data.agents = JSON.parse(readFileSync(agentPath, 'utf-8'));
       }
@@ -134,6 +135,14 @@ export const sessionTools: MCPTool[] = [
       required: ['name'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vName = validateText(input.name, 'name', 256);
+      if (!vName.valid) return { success: false, error: vName.error };
+      if (input.description) {
+        const v = validateText(input.description, 'description');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       // Load related data based on options
@@ -187,6 +196,16 @@ export const sessionTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.sessionId) {
+        const v = validateIdentifier(input.sessionId, 'sessionId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+      if (input.name) {
+        const v = validateText(input.name, 'name', 256);
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       let session: SessionRecord | null = null;
 
       // Try to find by sessionId first
@@ -210,19 +229,41 @@ export const sessionTools: MCPTool[] = [
       }
 
       if (session) {
-        // Restore data to respective stores
+        // Restore data to respective stores (legacy JSON for backward compat)
         if (session.data?.memory) {
-          const memoryDir = join(process.cwd(), STORAGE_DIR, 'memory');
+          const memoryDir = join(getProjectCwd(), STORAGE_DIR, 'memory');
           if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
           writeFileSync(join(memoryDir, 'store.json'), JSON.stringify(session.data.memory, null, 2), 'utf-8');
+
+          // Also populate active sql.js SQLite database so memory-tools can find entries
+          try {
+            const { storeEntry } = await import('../memory/memory-initializer.js');
+            const memoryData = session.data.memory as { entries?: Record<string, { key?: string; id?: string; value?: string; content?: string; namespace?: string }> };
+            if (memoryData.entries) {
+              for (const entry of Object.values(memoryData.entries)) {
+                const key = entry.key || entry.id || '';
+                const value = entry.value || entry.content || '';
+                if (key && value) {
+                  await storeEntry({
+                    key,
+                    value,
+                    namespace: entry.namespace || 'restored',
+                    upsert: true,
+                  });
+                }
+              }
+            }
+          } catch {
+            // Legacy JSON restore is the fallback -- sql.js import may not be available
+          }
         }
         if (session.data?.tasks) {
-          const taskDir = join(process.cwd(), STORAGE_DIR, 'tasks');
+          const taskDir = join(getProjectCwd(), STORAGE_DIR, 'tasks');
           if (!existsSync(taskDir)) mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'store.json'), JSON.stringify(session.data.tasks, null, 2), 'utf-8');
         }
         if (session.data?.agents) {
-          const agentDir = join(process.cwd(), STORAGE_DIR, 'agents');
+          const agentDir = join(getProjectCwd(), STORAGE_DIR, 'agents');
           if (!existsSync(agentDir)) mkdirSync(agentDir, { recursive: true });
           writeFileSync(join(agentDir, 'store.json'), JSON.stringify(session.data.agents, null, 2), 'utf-8');
         }
@@ -296,6 +337,10 @@ export const sessionTools: MCPTool[] = [
       required: ['sessionId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.sessionId, 'sessionId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const sessionId = input.sessionId as string;
       const path = getSessionPath(sessionId);
 
@@ -327,6 +372,10 @@ export const sessionTools: MCPTool[] = [
       required: ['sessionId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.sessionId, 'sessionId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const sessionId = input.sessionId as string;
       const session = loadSession(sessionId);
 

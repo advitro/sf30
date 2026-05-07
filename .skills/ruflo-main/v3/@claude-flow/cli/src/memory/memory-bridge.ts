@@ -79,20 +79,61 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
         };
 
         try {
-          await registry.initialize({
+          await (registry as any).initialize({
             dbPath: dbPath || getDbPath(),
+            embeddingModel: 'Xenova/all-MiniLM-L6-v2',
             dimension: 384,
+            vectorBackend: 'auto',
             controllers: {
               reasoningBank: true,
               learningBridge: false,
               tieredCache: true,
               hierarchicalMemory: true,
               memoryConsolidation: true,
-              memoryGraph: true, // issue #1214: enable MemoryGraph for graph-aware ranking
+              memoryGraph: true,
+              vectorBackend: true,
             },
           });
         } finally {
           console.log = origLog;
+        }
+
+        // Wire intelligence module as the learning backend
+        // AgentDB's ReasoningBank/LearningSystem need a better-sqlite3 db handle
+        // which ControllerRegistry doesn't expose. Instead, use the local intelligence
+        // module (SONA + LocalReasoningBank + file persistence) for learning.
+        try {
+          const intelligence = await import('./intelligence.js');
+          const initResult = await intelligence.initializeIntelligence();
+          const reg = registry as any;
+
+          if (initResult.reasoningBankEnabled) {
+            const rb = intelligence.getReasoningBank();
+            if (rb && !reg.get('reasoningBank')) {
+              if (typeof reg.set === 'function') reg.set('reasoningBank', rb);
+              else reg._controllers = { ...(reg._controllers || {}), reasoningBank: rb };
+            }
+          }
+
+          if (initResult.sonaEnabled) {
+            const sona = intelligence.getSonaCoordinator();
+            if (sona && !reg.get('learningSystem')) {
+              if (typeof reg.set === 'function') reg.set('learningSystem', sona);
+              else reg._controllers = { ...(reg._controllers || {}), learningSystem: sona };
+            }
+          }
+
+          // SkillLibrary from AgentDB (no db required)
+          try {
+            const agentdb = await import('agentdb');
+            if (agentdb.SkillLibrary && !reg.get('skills')) {
+              const sk = new (agentdb.SkillLibrary as any)();
+              if (typeof reg.set === 'function') reg.set('skills', sk);
+              else reg._controllers = { ...(reg._controllers || {}), skills: sk };
+            }
+          } catch { /* AgentDB not available */ }
+        } catch {
+          // Intelligence module not available — learning stays unwired
         }
 
         registryInstance = registry;
@@ -324,6 +365,7 @@ export async function bridgeStoreEntry(options: {
   success: boolean;
   id: string;
   embedding?: { dimensions: number; model: string };
+  rawEmbedding?: number[];
   guarded?: boolean;
   cached?: boolean;
   attested?: boolean;
@@ -403,6 +445,7 @@ export async function bridgeStoreEntry(options: {
       success: true,
       id,
       embedding: embeddingJson ? { dimensions, model } : undefined,
+      rawEmbedding: embeddingJson ? JSON.parse(embeddingJson) as number[] : undefined,
       guarded: true,
       cached: true,
       attested: true,
@@ -444,7 +487,8 @@ export async function bridgeSearchEntries(options: {
   if (!ctx) return null;
 
   try {
-    const { query: queryStr, namespace = 'default', limit = 10, threshold = 0.3 } = options;
+    const { query: queryStr, namespace, limit = 10, threshold = 0.3 } = options;
+    const effectiveNamespace = namespace || 'all';
     const startTime = Date.now();
 
     // Generate query embedding
@@ -460,7 +504,7 @@ export async function bridgeSearchEntries(options: {
     }
 
     // better-sqlite3: .prepare().all() returns array of objects
-    const nsFilter = namespace !== 'all'
+    const nsFilter = effectiveNamespace !== 'all'
       ? `AND namespace = ?`
       : '';
 
@@ -472,7 +516,7 @@ export async function bridgeSearchEntries(options: {
         WHERE status = 'active' ${nsFilter}
         LIMIT 1000
       `);
-      rows = namespace !== 'all' ? stmt.all(namespace) : stmt.all();
+      rows = effectiveNamespace !== 'all' ? stmt.all(effectiveNamespace) : stmt.all();
     } catch {
       return null;
     }
@@ -506,10 +550,11 @@ export async function bridgeSearchEntries(options: {
       }
 
       // Reciprocal rank fusion: combine semantic and BM25
-      // Weight: 0.7 semantic + 0.3 BM25 (semantic preferred when embeddings available)
-      const score = queryEmbedding
+      // Weight: 0.7 semantic + 0.3 BM25 when both embeddings present
+      // Fall back to BM25-only when either query or row lacks an embedding
+      const score = semanticScore > 0
         ? (0.7 * semanticScore + 0.3 * bm25ScoreVal)
-        : bm25ScoreVal;  // BM25-only when no embeddings
+        : bm25ScoreVal;
 
       if (score >= threshold) {
         // Phase 4: ExplainableRecall provenance
@@ -1147,16 +1192,32 @@ export async function bridgeStorePattern(options: {
     }
 
     // Fallback: store via bridge SQL
+    const patternValue = JSON.stringify({ pattern: options.pattern, type: options.type, confidence: options.confidence, metadata: options.metadata });
     const result = await bridgeStoreEntry({
       key: patternId,
-      value: JSON.stringify({ pattern: options.pattern, type: options.type, confidence: options.confidence, metadata: options.metadata }),
+      value: patternValue,
       namespace: 'pattern',
       generateEmbeddingFlag: true,
       tags: [options.type, 'reasoning-pattern'],
       dbPath: options.dbPath,
     });
 
-    return result ? { success: true, patternId: result.id, controller: 'bridge-fallback' } : null;
+    if (!result) return null;
+
+    // Add to HNSW index for fast semantic search (bridgeStoreEntry stores SQL only)
+    if (result.rawEmbedding) {
+      try {
+        const { addToHNSWIndex } = await import('./memory-initializer.js');
+        await addToHNSWIndex(result.id, result.rawEmbedding, {
+          id: result.id,
+          key: patternId,
+          namespace: 'pattern',
+          content: patternValue,
+        });
+      } catch { /* HNSW is best-effort */ }
+    }
+
+    return { success: true, patternId: result.id, controller: 'bridge-fallback' };
   } catch {
     return null;
   }
@@ -1177,11 +1238,14 @@ export async function bridgeSearchPatterns(options: {
   try {
     const reasoningBank = registry.get('reasoningBank');
 
-    if (reasoningBank && typeof reasoningBank.search === 'function') {
-      const results = await reasoningBank.search(options.query, {
-        topK: options.topK || 5,
-        minScore: options.minConfidence || 0.3,
-      });
+    // ReasoningBank may expose .searchPatterns() (agentdb) or .search() (legacy) (#1492 Bug 2)
+    if (reasoningBank && typeof (reasoningBank.searchPatterns ?? reasoningBank.search) === 'function') {
+      let results: any;
+      if (typeof reasoningBank.searchPatterns === 'function') {
+        results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
+      } else {
+        results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
+      }
       return {
         results: Array.isArray(results) ? results.map((r: any) => ({
           id: r.id || r.patternId || '',
@@ -1672,12 +1736,21 @@ export async function bridgeBatchOperation(params: { operation: string; entries:
     let result;
     switch (params.operation) {
       case 'insert': {
-        // insertEpisodes expects [{content, metadata?, embedding?}]
+        if (typeof batch.insertEpisodes !== 'function') {
+          return { success: false, error: 'BatchOperations.insertEpisodes not available — embedder may not be initialized. Use memory_store instead.' };
+        }
         const episodes = params.entries.map((e: any) => ({
           content: e.value || e.content || JSON.stringify(e),
           metadata: e.metadata || { key: e.key },
         }));
-        result = await batch.insertEpisodes(episodes);
+        try {
+          result = await batch.insertEpisodes(episodes);
+        } catch (insertErr: any) {
+          if (insertErr?.message?.includes('null') || insertErr?.message?.includes('embedBatch')) {
+            return { success: false, error: 'Embedder not initialized for batch insert. Use memory_store for individual entries or run embeddings_init first.' };
+          }
+          throw insertErr;
+        }
         break;
       }
       case 'delete': {
@@ -1754,6 +1827,62 @@ export async function bridgeSemanticRoute(params: { input: string }): Promise<an
     const result = await router.route(params.input);
     return { route: result, controller: 'semanticRouter' };
   } catch (e: any) { return { route: null, error: e.message }; }
+}
+
+// ===== RaBitQ data export =====
+
+/**
+ * Export all embeddings from the bridge's better-sqlite3 connection.
+ * Used by RaBitQ to build its index from the same data that memory_store writes.
+ * Returns null if bridge is unavailable (caller falls back to sql.js).
+ */
+export async function bridgeGetAllEmbeddings(options?: {
+  dimensions?: number;
+  limit?: number;
+  dbPath?: string;
+}): Promise<Array<{
+  id: string;
+  key: string;
+  namespace: string;
+  embedding: number[];
+}> | null> {
+  const registry = await getRegistry(options?.dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  try {
+    const dims = options?.dimensions ?? 384;
+    const maxRows = options?.limit ?? 50000;
+
+    const rows: any[] = ctx.db.prepare(`
+      SELECT id, key, namespace, embedding
+      FROM memory_entries
+      WHERE status = 'active' AND embedding IS NOT NULL
+      LIMIT ?
+    `).all(maxRows);
+
+    const results: Array<{ id: string; key: string; namespace: string; embedding: number[] }> = [];
+
+    for (const row of rows) {
+      if (!row.embedding) continue;
+      try {
+        const emb = JSON.parse(row.embedding) as number[];
+        if (emb.length !== dims) continue;
+        results.push({
+          id: String(row.id),
+          key: row.key || String(row.id),
+          namespace: row.namespace || 'default',
+          embedding: emb,
+        });
+      } catch { /* skip invalid */ }
+    }
+
+    return results;
+  } catch {
+    return null;
+  }
 }
 
 // ===== Utility =====

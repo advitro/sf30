@@ -9,7 +9,8 @@
  * - Useful for workflow orchestration and state tracking
  */
 
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -53,7 +54,7 @@ interface DAAStore {
 }
 
 function getDAADir(): string {
-  return join(process.cwd(), STORAGE_DIR, DAA_DIR);
+  return join(getProjectCwd(), STORAGE_DIR, DAA_DIR);
 }
 
 function getDAAPath(): string {
@@ -103,6 +104,10 @@ export const daaTools: MCPTool[] = [
       required: ['id'],
     },
     handler: async (input) => {
+      const vId = validateIdentifier(input.id, 'id');
+      if (!vId.valid) return { success: false, error: vId.error };
+      if (input.name) { const vName = validateText(input.name, 'name'); if (!vName.valid) return { success: false, error: vName.error }; }
+      if (input.type) { const vType = validateIdentifier(input.type, 'type'); if (!vType.valid) return { success: false, error: vType.error }; }
       const store = loadDAAStore();
       const id = input.id as string;
 
@@ -126,6 +131,17 @@ export const daaTools: MCPTool[] = [
 
       store.agents[id] = agent;
       saveDAAStore(store);
+
+      // Store agent in AgentDB for searchable agent registry
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        await bridge.bridgeStoreEntry({
+          key: `daa-agent-${id}`,
+          value: JSON.stringify({ id: agent.id, name: agent.name, type: agent.type, cognitivePattern: agent.cognitivePattern }),
+          namespace: 'daa-agents',
+          tags: [agent.type, agent.cognitivePattern],
+        });
+      } catch { /* AgentDB not available */ }
 
       return {
         success: true,
@@ -156,6 +172,9 @@ export const daaTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
+      const vAgentId = validateIdentifier(input.agentId, 'agentId');
+      if (!vAgentId.valid) return { success: false, error: vAgentId.error };
+      if (input.feedback) { const vFeedback = validateText(input.feedback, 'feedback'); if (!vFeedback.valid) return { success: false, error: vFeedback.error }; }
       const store = loadDAAStore();
       const agentId = input.agentId as string;
       const agent = store.agents[agentId];
@@ -170,13 +189,21 @@ export const daaTools: MCPTool[] = [
       agent.metrics.adaptations++;
       agent.metrics.successRate = (agent.metrics.successRate + performanceScore) / 2;
       agent.lastActivity = new Date().toISOString();
-      agent.status = 'learning';
-
-      // Simulate adaptation delay
-      await new Promise(resolve => setTimeout(resolve, 50));
-
       agent.status = 'active';
       saveDAAStore(store);
+
+      // Store adaptation feedback in AgentDB for pattern learning (backward compat: JSON store above)
+      let _storedIn: 'agentdb' | 'json-store' = 'json-store';
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        await bridge.bridgeRecordFeedback({
+          taskId: `adapt-${agentId}-${agent.metrics.adaptations}`,
+          success: performanceScore >= 0.5,
+          quality: performanceScore,
+          agent: agentId,
+        });
+        _storedIn = 'agentdb';
+      } catch { /* AgentDB not available */ }
 
       return {
         success: true,
@@ -188,6 +215,7 @@ export const daaTools: MCPTool[] = [
           newSuccessRate: agent.metrics.successRate,
         },
         status: agent.status,
+        _storedIn,
       };
     },
   },
@@ -207,6 +235,10 @@ export const daaTools: MCPTool[] = [
       required: ['id', 'name'],
     },
     handler: async (input) => {
+      const vId = validateIdentifier(input.id, 'id');
+      if (!vId.valid) return { success: false, error: vId.error };
+      const vName = validateText(input.name, 'name');
+      if (!vName.valid) return { success: false, error: vName.error };
       const store = loadDAAStore();
       const id = input.id as string;
 
@@ -249,6 +281,8 @@ export const daaTools: MCPTool[] = [
       required: ['workflowId'],
     },
     handler: async (input) => {
+      const vWorkflowId = validateIdentifier(input.workflowId, 'workflowId');
+      if (!vWorkflowId.valid) return { success: false, error: vWorkflowId.error };
       const store = loadDAAStore();
       const workflowId = input.workflowId as string;
       const workflow = store.workflows[workflowId];
@@ -260,23 +294,27 @@ export const daaTools: MCPTool[] = [
       workflow.status = 'running';
       saveDAAStore(store);
 
-      // Simulate execution
-      for (const step of workflow.steps) {
-        step.status = 'running';
-        await new Promise(resolve => setTimeout(resolve, 10));
-        step.status = 'completed';
-        step.output = `Completed: ${step.name}`;
-      }
-
-      workflow.status = 'completed';
-      saveDAAStore(store);
+      // Store workflow state in AgentDB for tracking
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        await bridge.bridgeStoreEntry({
+          key: `workflow-${workflowId}`,
+          value: JSON.stringify({
+            id: workflowId, status: 'running',
+            steps: workflow.steps.length, strategy: workflow.strategy,
+            startedAt: new Date().toISOString(),
+          }),
+          namespace: 'daa-workflows',
+        });
+      } catch { /* AgentDB not available */ }
 
       return {
         success: true,
         workflowId,
         status: workflow.status,
         steps: workflow.steps,
-        completedAt: new Date().toISOString(),
+        startedAt: new Date().toISOString(),
+        _note: 'Steps are tracked but not auto-executed. Use agent tools to execute each step.',
       };
     },
   },
@@ -295,19 +333,41 @@ export const daaTools: MCPTool[] = [
       required: ['sourceAgentId', 'targetAgentIds'],
     },
     handler: async (input) => {
+      const vSourceId = validateIdentifier(input.sourceAgentId, 'sourceAgentId');
+      if (!vSourceId.valid) return { success: false, error: vSourceId.error };
+      if (input.targetAgentIds && Array.isArray(input.targetAgentIds)) {
+        for (const t of input.targetAgentIds as string[]) { const vT = validateIdentifier(t, 'targetAgentIds[]'); if (!vT.valid) return { success: false, error: vT.error }; }
+      }
+      if (input.knowledgeDomain) { const vDomain = validateIdentifier(input.knowledgeDomain, 'knowledgeDomain'); if (!vDomain.valid) return { success: false, error: vDomain.error }; }
       const store = loadDAAStore();
       const sourceId = input.sourceAgentId as string;
       const targetIds = input.targetAgentIds as string[];
       const domain = (input.knowledgeDomain as string) || 'general';
 
       const knowledgeId = `knowledge-${Date.now()}`;
-      store.knowledge[knowledgeId] = {
+      const knowledgeEntry = {
         domain,
         content: input.knowledgeContent || {},
         sharedBy: sourceId,
+        targetAgents: targetIds,
         timestamp: new Date().toISOString(),
       };
 
+      // Primary: store in AgentDB for vector-searchable knowledge
+      let _storedIn: 'agentdb' | 'json-store' = 'json-store';
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        await bridge.bridgeStoreEntry({
+          key: knowledgeId,
+          value: JSON.stringify(knowledgeEntry),
+          namespace: 'daa-knowledge',
+          tags: [domain, sourceId, ...targetIds],
+        });
+        _storedIn = 'agentdb';
+      } catch { /* AgentDB not available */ }
+
+      // Backward compat: always persist in JSON store
+      store.knowledge[knowledgeId] = knowledgeEntry;
       saveDAAStore(store);
 
       return {
@@ -316,7 +376,11 @@ export const daaTools: MCPTool[] = [
         sourceAgent: sourceId,
         targetAgents: targetIds,
         domain,
-        sharedAt: new Date().toISOString(),
+        sharedAt: knowledgeEntry.timestamp,
+        _storedIn,
+        _note: _storedIn === 'agentdb'
+          ? 'Knowledge stored in AgentDB (vector-searchable) and JSON store. Target agents can retrieve via daa_learning_status or memory search.'
+          : 'Knowledge stored in shared JSON registry. Target agents can retrieve via daa_learning_status. No cross-agent memory transfer occurs.',
       };
     },
   },
@@ -332,6 +396,7 @@ export const daaTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      if (input.agentId) { const vAgentId = validateIdentifier(input.agentId, 'agentId'); if (!vAgentId.valid) return { success: false, error: vAgentId.error }; }
       const store = loadDAAStore();
       const agentId = input.agentId as string;
 
@@ -388,6 +453,8 @@ export const daaTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      if (input.agentId) { const vAgentId = validateIdentifier(input.agentId, 'agentId'); if (!vAgentId.valid) return { success: false, error: vAgentId.error }; }
+      if (input.pattern) { const vPattern = validateIdentifier(input.pattern, 'pattern'); if (!vPattern.valid) return { success: false, error: vPattern.error }; }
       const store = loadDAAStore();
       const agentId = input.agentId as string;
       const action = (input.action as string) || 'analyze';
@@ -403,11 +470,9 @@ export const daaTools: MCPTool[] = [
             success: true,
             agentId,
             currentPattern: agent.cognitivePattern,
-            analysis: {
-              strengths: ['Pattern recognition', 'Adaptive learning'],
-              weaknesses: ['May be slow for simple tasks'],
-              recommendations: ['Consider convergent for focused tasks'],
-            },
+            learningRate: agent.learningRate,
+            metrics: agent.metrics,
+            _note: 'Pattern analysis requires real cognitive modeling. Current pattern and metrics shown.',
           };
         }
 

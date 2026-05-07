@@ -62,7 +62,6 @@
     "directory": "v3/plugins/legal-contracts"
   },
   "dependencies": {
-    "@claude-flow/ruvector-upstream": "^0.1.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

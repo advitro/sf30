@@ -547,16 +547,9 @@ describe('Command Registry (commands/index.ts)', () => {
     expect(indexModule.sessionCommand).toBeDefined();
     expect(indexModule.mcpCommand).toBeDefined();
     expect(indexModule.hooksCommand).toBeDefined();
-    expect(indexModule.daemonCommand).toBeDefined();
-    expect(indexModule.doctorCommand).toBeDefined();
-    expect(indexModule.embeddingsCommand).toBeDefined();
-    expect(indexModule.neuralCommand).toBeDefined();
-    expect(indexModule.performanceCommand).toBeDefined();
-    expect(indexModule.securityCommand).toBeDefined();
-    expect(indexModule.hiveMindCommand).toBeDefined();
-    expect(indexModule.guidanceCommand).toBeDefined();
-    expect(indexModule.applianceCommand).toBeDefined();
-    expect(indexModule.ruvectorCommand).toBeDefined();
+    // Advanced commands are lazy-loaded (PERF-03) — verify async getters exist
+    expect(typeof indexModule.getCommandAsync).toBe('function');
+    expect(typeof indexModule.loadAllCommands).toBe('function');
   });
 
   it('should export commandsByCategory with all categories', async () => {
@@ -569,7 +562,7 @@ describe('Command Registry (commands/index.ts)', () => {
   it('should export commands array with many entries', async () => {
     const indexModule = await import('../src/commands/index.js');
     expect(Array.isArray(indexModule.commands)).toBe(true);
-    expect(indexModule.commands.length).toBeGreaterThanOrEqual(15);
+    expect(indexModule.commands.length).toBeGreaterThanOrEqual(10);
   });
 
   it('should export loadAllCommands as async function', async () => {
@@ -668,8 +661,9 @@ describe('CommandParser', () => {
       expect(result.flags.config).toBe('/path/config.json');
     });
 
-    it('should parse short flag -f with value', () => {
-      const result = parser.parse(['-f', 'json']);
+    it('should parse long flag --format with value', () => {
+      // Short flag -f removed from global options — collides with 50+ subcommands (#1425)
+      const result = parser.parse(['--format', 'json']);
       expect(result.flags.format).toBe('json');
     });
   });

@@ -7,7 +7,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier } from './validate-input.js';
 
 // Swarm state persistence
 const SWARM_DIR = '.claude-flow/swarm';
@@ -31,7 +32,7 @@ interface SwarmStore {
 }
 
 function getSwarmDir(): string {
-  return join(process.cwd(), SWARM_DIR);
+  return join(getProjectCwd(), SWARM_DIR);
 }
 
 function getSwarmStatePath(): string {
@@ -80,6 +81,16 @@ export const swarmTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.topology) {
+        const v = validateIdentifier(input.topology, 'topology');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+      if (input.strategy) {
+        const v = validateIdentifier(input.strategy, 'strategy');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const topology = (input.topology as string) || 'hierarchical-mesh';
       const maxAgents = Math.min(Math.max((input.maxAgents as number) || 15, 1), 50);
       const strategy = (input.strategy as string) || 'specialized';
@@ -141,6 +152,12 @@ export const swarmTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.swarmId) {
+        const v = validateIdentifier(input.swarmId, 'swarmId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadSwarmStore();
       const swarmId = input.swarmId as string;
 
@@ -199,6 +216,12 @@ export const swarmTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.swarmId) {
+        const v = validateIdentifier(input.swarmId, 'swarmId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadSwarmStore();
       const swarmId = input.swarmId as string;
 
@@ -254,6 +277,12 @@ export const swarmTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.swarmId) {
+        const v = validateIdentifier(input.swarmId, 'swarmId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadSwarmStore();
       const swarmId = input.swarmId as string;
 

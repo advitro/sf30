@@ -6,6 +6,7 @@
  */
 
 import type { MCPTool } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 import type { ChatMessage } from '../ruvector/ruvllm-wasm.js';
 
 async function loadRuvllmWasm() {
@@ -20,8 +21,33 @@ export const ruvllmWasmTools: MCPTool[] = [
     handler: async () => {
       try {
         const mod = await loadRuvllmWasm();
-        const status = await mod.getRuvllmStatus();
-        return { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] };
+        const wasmStatus = await mod.getRuvllmStatus();
+
+        // Also include native ruvllm CJS backend status (ADR-086)
+        let nativeBackend: Record<string, unknown> = { available: false };
+        try {
+          const { getIntelligenceStats } = await import('../memory/intelligence.js');
+          const iStats = getIntelligenceStats();
+          const { getSONAStats } = await import('../memory/sona-optimizer.js');
+          const sStats = await getSONAStats();
+          nativeBackend = {
+            available: iStats._ruvllmBackend === 'active',
+            coordinator: iStats._ruvllmBackend || 'unavailable',
+            trajectories: iStats._ruvllmTrajectories || 0,
+            contrastiveTrainer: sStats._contrastiveTrainer !== 'unavailable' ? 'active' : 'unavailable',
+            trainingBackend: iStats._trainingBackend || 'unknown',
+          };
+        } catch { /* not initialized yet */ }
+
+        // Graph database status (ADR-087)
+        let graphStatus: Record<string, unknown> = { available: false };
+        try {
+          const { getGraphStats } = await import('../ruvector/graph-backend.js');
+          const gs = await getGraphStats();
+          graphStatus = { available: gs.backend === 'graph-node', ...gs };
+        } catch { /* not loaded */ }
+
+        return { content: [{ type: 'text', text: JSON.stringify({ wasm: wasmStatus, native: nativeBackend, graph: graphStatus }, null, 2) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: JSON.stringify({ error: String(err) }) }], isError: true };
       }
@@ -64,12 +90,14 @@ export const ruvllmWasmTools: MCPTool[] = [
       properties: {
         routerId: { type: 'string', description: 'HNSW router ID from ruvllm_hnsw_create' },
         name: { type: 'string', description: 'Pattern name/label' },
-        embedding: { type: 'array', description: 'Float array embedding vector' },
+        embedding: { type: 'array', items: { type: 'number' }, description: 'Float array embedding vector' },
         metadata: { type: 'object', description: 'Optional metadata object' },
       },
       required: ['routerId', 'name', 'embedding'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.routerId, 'routerId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
+      { const v = validateIdentifier(args.name, 'name'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const router = hnswRouters.get(args.routerId as string);
         if (!router) return { content: [{ type: 'text', text: JSON.stringify({ error: `Router not found: ${args.routerId}` }) }], isError: true };
@@ -92,12 +120,13 @@ export const ruvllmWasmTools: MCPTool[] = [
       type: 'object' as const,
       properties: {
         routerId: { type: 'string', description: 'HNSW router ID' },
-        query: { type: 'array', description: 'Query embedding vector' },
+        query: { type: 'array', items: { type: 'number' }, description: 'Query embedding vector' },
         k: { type: 'number', description: 'Number of nearest neighbors (default: 3)' },
       },
       required: ['routerId', 'query'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.routerId, 'routerId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const router = hnswRouters.get(args.routerId as string);
         if (!router) return { content: [{ type: 'text', text: JSON.stringify({ error: `Router not found: ${args.routerId}` }) }], isError: true };
@@ -148,6 +177,7 @@ export const ruvllmWasmTools: MCPTool[] = [
       required: ['sonaId', 'quality'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.sonaId, 'sonaId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const sona = sonaInstances.get(args.sonaId as string);
         if (!sona) return { content: [{ type: 'text', text: JSON.stringify({ error: `SONA not found: ${args.sonaId}` }) }], isError: true };
@@ -202,6 +232,7 @@ export const ruvllmWasmTools: MCPTool[] = [
       required: ['loraId', 'quality'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.loraId, 'loraId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const lora = loraInstances.get(args.loraId as string);
         if (!lora) return { content: [{ type: 'text', text: JSON.stringify({ error: `MicroLoRA not found: ${args.loraId}` }) }], isError: true };
@@ -224,6 +255,7 @@ export const ruvllmWasmTools: MCPTool[] = [
       properties: {
         messages: {
           type: 'array',
+          items: { type: 'object', properties: { role: { type: 'string' }, content: { type: 'string' } }, required: ['role', 'content'] },
           description: 'Array of {role, content} message objects',
         },
         template: { type: 'string', description: 'Template preset (llama3, mistral, chatml, phi, gemma) or model ID for auto-detection' },
@@ -231,6 +263,7 @@ export const ruvllmWasmTools: MCPTool[] = [
       required: ['messages', 'template'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateText(args.template, 'template', 256); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const mod = await loadRuvllmWasm();
         const messages = args.messages as ChatMessage[];
@@ -259,7 +292,7 @@ export const ruvllmWasmTools: MCPTool[] = [
         topP: { type: 'number', description: 'Top-p sampling' },
         topK: { type: 'number', description: 'Top-k sampling' },
         repetitionPenalty: { type: 'number', description: 'Repetition penalty' },
-        stopSequences: { type: 'array', description: 'Stop sequences' },
+        stopSequences: { type: 'array', items: { type: 'string' }, description: 'Stop sequences' },
       },
     },
     handler: async (args: Record<string, unknown>) => {

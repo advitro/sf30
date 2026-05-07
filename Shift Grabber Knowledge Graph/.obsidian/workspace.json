@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "7c462d3b0b2f1a89",
+        "id": "b9e32fb8de4a997e",
         "type": "tabs",
         "children": [
           {
-            "id": "shift-grabber-index",
+            "id": "d574f890599ba33f",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Project Evolution.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Project Evolution"
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
             }
           }
         ]
@@ -107,8 +103,9 @@
       "bases:Create new base": false
     }
   },
-  "active": "shift-grabber-index",
+  "active": "d574f890599ba33f",
   "lastOpenFiles": [
+    "Project Evolution.md",
     "Untitled.canvas",
     "UI Design System.md",
     "Security Hardening v2.1.md",

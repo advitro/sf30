@@ -6,7 +6,8 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -34,7 +35,7 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
 };
 
 function getConfigDir(): string {
-  return join(process.cwd(), STORAGE_DIR);
+  return join(getProjectCwd(), STORAGE_DIR);
 }
 
 function getConfigPath(): string {
@@ -133,6 +134,14 @@ export const configTools: MCPTool[] = [
       required: ['key'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vKey = validateText(input.key, 'key', 256);
+      if (!vKey.valid) return { success: false, error: vKey.error };
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const key = input.key as string;
       const scope = (input.scope as string) || 'default';
@@ -173,6 +182,14 @@ export const configTools: MCPTool[] = [
       required: ['key', 'value'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vKey = validateText(input.key, 'key', 256);
+      if (!vKey.valid) return { success: false, error: vKey.error };
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const key = input.key as string;
       const value = input.value;
@@ -214,6 +231,16 @@ export const configTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+      if (input.prefix) {
+        const v = validateText(input.prefix, 'prefix', 256);
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const scope = (input.scope as string) || 'default';
       const prefix = input.prefix as string;
@@ -267,6 +294,16 @@ export const configTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+      if (input.key) {
+        const v = validateText(input.key, 'key', 256);
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const scope = (input.scope as string) || 'default';
       const key = input.key as string;
@@ -318,6 +355,12 @@ export const configTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const scope = (input.scope as string) || 'default';
       const includeDefaults = input.includeDefaults !== false;
@@ -357,6 +400,12 @@ export const configTools: MCPTool[] = [
       required: ['config'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.scope) {
+        const v = validateIdentifier(input.scope, 'scope');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadConfigStore();
       const config = filterDangerousKeys(input.config as Record<string, unknown>);
       const scope = (input.scope as string) || 'default';

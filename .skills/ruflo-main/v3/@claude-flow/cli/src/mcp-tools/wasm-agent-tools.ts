@@ -6,6 +6,7 @@
  */
 
 import type { MCPTool } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 
 async function loadAgentWasm() {
   const mod = await import('../ruvector/agent-wasm.js');
@@ -26,6 +27,9 @@ export const wasmAgentTools: MCPTool[] = [
       },
     },
     handler: async (args: Record<string, unknown>) => {
+      if (args.template) { const v = validateIdentifier(args.template, 'template'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
+      if (args.model) { const v = validateIdentifier(args.model, 'model'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
+      if (args.instructions) { const v = validateText(args.instructions, 'instructions'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         if (args.template) {
@@ -55,6 +59,8 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['agentId', 'input'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.agentId, 'agentId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
+      { const v = validateText(args.input, 'input'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const result = await wasm.promptWasmAgent(args.agentId as string, args.input as string);
@@ -77,6 +83,8 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['agentId', 'toolName'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.agentId, 'agentId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
+      { const v = validateIdentifier(args.toolName, 'toolName'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         // Flat format: {tool: 'write_file', path: '...', content: '...'}
@@ -116,6 +124,7 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.agentId, 'agentId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const ok = wasm.terminateWasmAgent(args.agentId as string);
@@ -136,6 +145,7 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.agentId, 'agentId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const tools = wasm.getWasmAgentTools(args.agentId as string);
@@ -157,6 +167,7 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.agentId, 'agentId'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const state = wasm.exportWasmState(args.agentId as string);
@@ -191,6 +202,7 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['query'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateText(args.query, 'query'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const results = await wasm.searchGalleryTemplates(args.query as string);
@@ -211,6 +223,7 @@ export const wasmAgentTools: MCPTool[] = [
       required: ['template'],
     },
     handler: async (args: Record<string, unknown>) => {
+      { const v = validateIdentifier(args.template, 'template'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }) }], isError: true }; }
       try {
         const wasm = await loadAgentWasm();
         const info = await wasm.createAgentFromTemplate(args.template as string);

@@ -54,9 +54,9 @@
     "node": ">=20.0.0"
   },
   "peerDependencies": {
-    "@claude-flow/memory": ">=3.0.0",
-    "@claude-flow/security": ">=3.0.0",
-    "@claude-flow/coordination": ">=3.0.0"
+    "@claude-flow/memory": ">=3.0.0-0",
+    "@claude-flow/security": ">=3.0.0-0",
+    "@claude-flow/coordination": ">=3.0.0-0"
   },
   "peerDependenciesMeta": {
     "@claude-flow/memory": {

@@ -6,7 +6,8 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier, validateText } from './validate-input.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -34,7 +35,7 @@ interface TaskStore {
 }
 
 function getTaskDir(): string {
-  return join(process.cwd(), STORAGE_DIR, TASK_DIR);
+  return join(getProjectCwd(), STORAGE_DIR, TASK_DIR);
 }
 
 function getTaskPath(): string {
@@ -83,6 +84,12 @@ export const taskTools: MCPTool[] = [
       required: ['type', 'description'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vType = validateIdentifier(input.type, 'type');
+      if (!vType.valid) return { success: false, error: vType.error };
+      const vDesc = validateText(input.description, 'description');
+      if (!vDesc.valid) return { success: false, error: vDesc.error };
+
       const store = loadTaskStore();
       const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -127,6 +134,10 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.taskId, 'taskId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const store = loadTaskStore();
       const taskId = input.taskId as string;
       const task = store.tasks[taskId];
@@ -144,6 +155,7 @@ export const taskTools: MCPTool[] = [
           createdAt: task.createdAt,
           startedAt: task.startedAt,
           completedAt: task.completedAt,
+          result: task.result || null,
         };
       }
 
@@ -229,6 +241,10 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.taskId, 'taskId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const store = loadTaskStore();
       const taskId = input.taskId as string;
       const task = store.tasks[taskId];
@@ -242,7 +258,7 @@ export const taskTools: MCPTool[] = [
 
         // Sync assigned agents back to idle and increment taskCount
         if (task.assignedTo.length > 0) {
-          const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents.json');
+          const agentStorePath = join(getProjectCwd(), STORAGE_DIR, 'agents', 'store.json');
           try {
             let agentStore: { agents: Record<string, Record<string, unknown>> } = { agents: {} };
             if (existsSync(agentStorePath)) {
@@ -292,6 +308,10 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.taskId, 'taskId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const store = loadTaskStore();
       const taskId = input.taskId as string;
       const task = store.tasks[taskId];
@@ -342,6 +362,10 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.taskId, 'taskId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const store = loadTaskStore();
       const taskId = input.taskId as string;
       const task = store.tasks[taskId];
@@ -353,7 +377,7 @@ export const taskTools: MCPTool[] = [
       const previouslyAssigned = [...task.assignedTo];
 
       // Load agent store to sync worker state
-      const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents.json');
+      const agentStorePath = join(getProjectCwd(), STORAGE_DIR, 'agents', 'store.json');
       let agentStore: { agents: Record<string, Record<string, unknown>> } = { agents: {} };
       try {
         if (existsSync(agentStorePath)) {
@@ -398,7 +422,7 @@ export const taskTools: MCPTool[] = [
 
       saveTaskStore(store);
       // Save agent store
-      const agentDir = join(process.cwd(), STORAGE_DIR);
+      const agentDir = join(getProjectCwd(), STORAGE_DIR, 'agents');
       if (!existsSync(agentDir)) {
         mkdirSync(agentDir, { recursive: true });
       }
@@ -425,6 +449,14 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.taskId, 'taskId');
+      if (!vId.valid) return { success: false, error: vId.error };
+      if (input.reason) {
+        const v = validateText(input.reason, 'reason');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadTaskStore();
       const taskId = input.taskId as string;
       const task = store.tasks[taskId];

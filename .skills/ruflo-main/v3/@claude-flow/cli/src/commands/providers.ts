@@ -7,6 +7,116 @@
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
+import { configManager } from '../services/config-file-manager.js';
+
+/** Static provider catalog used as a reference/fallback */
+interface ProviderCatalogEntry {
+  name: string;
+  type: string;
+  models: string;
+  envVar?: string;
+  configName?: string;
+}
+
+const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
+  { name: 'Anthropic', type: 'LLM', models: 'claude-3.5-sonnet, opus', envVar: 'ANTHROPIC_API_KEY', configName: 'anthropic' },
+  { name: 'OpenAI', type: 'LLM', models: 'gpt-4o, gpt-4-turbo', envVar: 'OPENAI_API_KEY', configName: 'openai' },
+  { name: 'OpenAI', type: 'Embedding', models: 'text-embedding-3-small/large', envVar: 'OPENAI_API_KEY', configName: 'openai' },
+  { name: 'Google', type: 'LLM', models: 'gemini-pro, gemini-ultra', envVar: 'GOOGLE_API_KEY', configName: 'google' },
+  { name: 'Transformers.js', type: 'Embedding', models: 'Xenova/all-MiniLM-L6-v2' },
+  { name: 'Agentic Flow', type: 'Embedding', models: 'ONNX optimized' },
+  { name: 'Mock', type: 'All', models: 'mock-*' },
+];
+
+/**
+ * Resolve the API key for a provider by checking the config file first,
+ * then falling back to well-known environment variables.
+ */
+function resolveApiKey(
+  providerName: string,
+  configuredProviders: Array<Record<string, unknown>>,
+): string | undefined {
+  // Check config file entry
+  const entry = configuredProviders.find(
+    (p) => typeof p.name === 'string' && p.name.toLowerCase() === providerName.toLowerCase(),
+  );
+  if (entry?.apiKey && typeof entry.apiKey === 'string') {
+    return entry.apiKey;
+  }
+
+  // Check environment variable
+  const envMapping: Record<string, string> = {
+    anthropic: 'ANTHROPIC_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    google: 'GOOGLE_API_KEY',
+  };
+  const envVar = envMapping[providerName.toLowerCase()];
+  if (envVar && process.env[envVar]) {
+    return process.env[envVar];
+  }
+
+  return undefined;
+}
+
+/**
+ * Make a lightweight HTTP request to verify provider API key validity.
+ * Uses a 5-second timeout. Returns { ok, reason }.
+ */
+async function testProviderConnectivity(
+  providerName: string,
+  apiKey: string,
+): Promise<{ ok: boolean; reason: string }> {
+  const endpoints: Record<string, { url: string; headers: Record<string, string> }> = {
+    anthropic: {
+      url: 'https://api.anthropic.com/v1/models',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    },
+    openai: {
+      url: 'https://api.openai.com/v1/models',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    },
+    google: {
+      url: `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      headers: {},
+    },
+  };
+
+  const endpointConfig = endpoints[providerName.toLowerCase()];
+  if (!endpointConfig) {
+    return { ok: false, reason: 'No test endpoint available for this provider' };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(endpointConfig.url, {
+      method: 'GET',
+      headers: endpointConfig.headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok || res.status === 200) {
+      return { ok: true, reason: 'Connected successfully' };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, reason: `Authentication failed (HTTP ${res.status})` };
+    }
+    // A non-auth error but the server responded — key format may be fine
+    return { ok: false, reason: `Unexpected response (HTTP ${res.status})` };
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { ok: false, reason: 'Connection timed out (5s)' };
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: `Connection failed: ${msg}` };
+  }
+}
 
 // List subcommand
 const listCommand: Command = {
@@ -22,27 +132,98 @@ const listCommand: Command = {
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const type = ctx.flags.type as string || 'all';
+    const activeOnly = ctx.flags.active as boolean;
+
+    // Load user configuration
+    const cwd = process.cwd();
+    const config = configManager.getConfig(cwd);
+    const agents = (config.agents ?? {}) as Record<string, unknown>;
+    const configuredProviders = (agents.providers ?? []) as Array<Record<string, unknown>>;
+
+    // Build table rows from the catalog, enriched with configuration status
+    const rows: Array<Record<string, string>> = [];
+
+    for (const entry of PROVIDER_CATALOG) {
+      // Apply type filter
+      if (type !== 'all' && entry.type.toLowerCase() !== type.toLowerCase()) {
+        continue;
+      }
+
+      let status: string;
+      let keySource = '';
+
+      if (entry.configName) {
+        const apiKey = resolveApiKey(entry.configName, configuredProviders);
+        if (apiKey) {
+          // Determine the source for the key
+          const configEntry = configuredProviders.find(
+            (p) => typeof p.name === 'string' && p.name.toLowerCase() === entry.configName!.toLowerCase(),
+          );
+          if (configEntry?.apiKey && typeof configEntry.apiKey === 'string') {
+            keySource = 'config';
+          } else {
+            keySource = 'env';
+          }
+          status = output.success(`Configured (${keySource})`);
+        } else {
+          status = output.warning('Not configured');
+        }
+      } else if (entry.name === 'Mock') {
+        status = output.dim('Dev only');
+      } else {
+        // Local-only providers (Transformers.js, Agentic Flow) — always available
+        status = output.success('Available (local)');
+      }
+
+      if (activeOnly && !status.includes('Configured') && !status.includes('Available')) {
+        continue;
+      }
+
+      rows.push({
+        provider: entry.name,
+        type: entry.type,
+        models: entry.models,
+        status,
+      });
+    }
+
+    // Also show any providers in config that are not in the static catalog
+    for (const cp of configuredProviders) {
+      const cpName = (cp.name as string) || '';
+      const alreadyListed = PROVIDER_CATALOG.some(
+        (e) => e.configName?.toLowerCase() === cpName.toLowerCase() || e.name.toLowerCase() === cpName.toLowerCase(),
+      );
+      if (!alreadyListed && cpName) {
+        const hasKey = !!(cp.apiKey || resolveApiKey(cpName, configuredProviders));
+        rows.push({
+          provider: cpName,
+          type: (cp.type as string) || 'Custom',
+          models: (cp.model as string) || output.dim('(not specified)'),
+          status: hasKey ? output.success('Configured (config)') : output.warning('Not configured'),
+        });
+      }
+    }
 
     output.writeln();
-    output.writeln(output.bold('Available Providers'));
+    output.writeln(output.bold('Providers'));
     output.writeln(output.dim('─'.repeat(60)));
 
-    output.printTable({
-      columns: [
-        { key: 'provider', header: 'Provider', width: 18 },
-        { key: 'type', header: 'Type', width: 12 },
-        { key: 'models', header: 'Models', width: 25 },
-        { key: 'status', header: 'Status', width: 12 },
-      ],
-      data: [
-        { provider: 'Anthropic', type: 'LLM', models: 'claude-3.5-sonnet, opus', status: output.success('Active') },
-        { provider: 'OpenAI', type: 'LLM', models: 'gpt-4o, gpt-4-turbo', status: output.success('Active') },
-        { provider: 'OpenAI', type: 'Embedding', models: 'text-embedding-3-small/large', status: output.success('Active') },
-        { provider: 'Transformers.js', type: 'Embedding', models: 'all-MiniLM-L6-v2', status: output.success('Active') },
-        { provider: 'Agentic Flow', type: 'Embedding', models: 'ONNX optimized', status: output.success('Active') },
-        { provider: 'Mock', type: 'All', models: 'mock-*', status: output.dim('Dev only') },
-      ],
-    });
+    if (rows.length === 0) {
+      output.writeln(output.dim('  No providers match the current filter.'));
+    } else {
+      output.printTable({
+        columns: [
+          { key: 'provider', header: 'Provider', width: 18 },
+          { key: 'type', header: 'Type', width: 12 },
+          { key: 'models', header: 'Models', width: 25 },
+          { key: 'status', header: 'Status', width: 20 },
+        ],
+        data: rows,
+      });
+    }
+
+    output.writeln();
+    output.writeln(output.dim('Tip: Use "providers configure -p <name> -k <key>" to set API keys.'));
 
     return { success: true };
   },
@@ -63,33 +244,61 @@ const configureCommand: Command = {
     { command: 'claude-flow providers configure -p anthropic -m claude-3.5-sonnet', description: 'Set default model' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const provider = ctx.flags.provider as string;
-    const hasKey = ctx.flags.key as string;
-    const model = ctx.flags.model as string;
+    try {
+      const provider = (ctx.flags.provider as string) || (ctx.args && ctx.args[0]) || '';
+      const apiKey = ctx.flags.key as string | undefined;
+      const model = ctx.flags.model as string | undefined;
+      const endpoint = ctx.flags.endpoint as string | undefined;
 
-    if (!provider) {
-      output.printError('Provider name is required');
+      if (!provider) {
+        output.printError('Provider name is required. Use -p <name> or pass as first argument.');
+        return { success: false, exitCode: 1 };
+      }
+
+      const cwd = process.cwd();
+      const config = configManager.getConfig(cwd);
+
+      // Ensure agents.providers array exists
+      const agents = (config.agents ?? {}) as Record<string, unknown>;
+      const providers = (agents.providers ?? []) as Array<Record<string, unknown>>;
+
+      // Find existing provider entry or create a new one
+      let entry = providers.find(
+        (p) => typeof p.name === 'string' && p.name.toLowerCase() === provider.toLowerCase(),
+      );
+
+      if (!entry) {
+        entry = { name: provider, enabled: true };
+        providers.push(entry);
+      }
+
+      // Apply supplied settings
+      if (apiKey !== undefined) entry.apiKey = apiKey;
+      if (model !== undefined) entry.model = model;
+      if (endpoint !== undefined) entry.baseUrl = endpoint;
+
+      agents.providers = providers;
+      configManager.set(cwd, 'agents.providers', providers);
+
+      output.writeln();
+      output.writeln(output.bold(`Configured: ${provider}`));
+      output.writeln(output.dim('─'.repeat(40)));
+
+      if (apiKey) output.writeln(`  API Key : ${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`);
+      if (model) output.writeln(`  Model   : ${model}`);
+      if (endpoint) output.writeln(`  Endpoint: ${endpoint}`);
+      if (!apiKey && !model && !endpoint) {
+        output.writeln(`  Provider "${provider}" registered (no settings changed).`);
+      }
+
+      output.writeln();
+      output.writeln(output.success(`Provider "${provider}" configuration saved.`));
+      return { success: true };
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      output.printError(`Failed to configure provider: ${msg}`);
       return { success: false, exitCode: 1 };
     }
-
-    output.writeln();
-    output.writeln(output.bold(`Configure: ${provider}`));
-    output.writeln(output.dim('─'.repeat(40)));
-
-    const spinner = output.createSpinner({ text: 'Updating configuration...', spinner: 'dots' });
-    spinner.start();
-    await new Promise(r => setTimeout(r, 500));
-    spinner.succeed('Configuration updated');
-
-    output.writeln();
-    output.printBox([
-      `Provider: ${provider}`,
-      `API Key: ${hasKey ? '••••••••' + (hasKey as string).slice(-4) : 'Not set'}`,
-      `Model: ${model || 'Default'}`,
-      `Status: Active`,
-    ].join('\n'), 'Configuration');
-
-    return { success: true };
   },
 };
 
@@ -106,28 +315,120 @@ const testCommand: Command = {
     { command: 'claude-flow providers test --all', description: 'Test all providers' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const provider = ctx.flags.provider as string;
-    const testAll = ctx.flags.all as boolean;
+    try {
+      const provider = (ctx.flags.provider as string) || (ctx.args && ctx.args[0]) || '';
+      const testAll = ctx.flags.all as boolean;
 
-    output.writeln();
-    output.writeln(output.bold('Provider Connectivity Test'));
-    output.writeln(output.dim('─'.repeat(50)));
+      output.writeln();
+      output.writeln(output.bold('Provider Connectivity Test'));
+      output.writeln(output.dim('─'.repeat(50)));
 
-    const providers = testAll || !provider
-      ? ['Anthropic', 'OpenAI (LLM)', 'OpenAI (Embedding)', 'Transformers.js', 'Agentic Flow']
-      : [provider];
+      const cwd = process.cwd();
+      const config = configManager.getConfig(cwd);
+      const agents = (config.agents ?? {}) as Record<string, unknown>;
+      const configuredProviders = (agents.providers ?? []) as Array<Record<string, unknown>>;
 
-    for (const p of providers) {
-      const spinner = output.createSpinner({ text: `Testing ${p}...`, spinner: 'dots' });
-      spinner.start();
-      await new Promise(r => setTimeout(r, 300));
-      spinner.succeed(`${p}: Connected`);
+      // Collect the set of providers to test
+      interface ProviderTestTarget {
+        name: string;
+        configName: string;
+      }
+
+      const knownTargets: ProviderTestTarget[] = [
+        { name: 'Anthropic', configName: 'anthropic' },
+        { name: 'OpenAI', configName: 'openai' },
+        { name: 'Google', configName: 'google' },
+      ];
+
+      // Add Ollama as a special case (endpoint-based, no API key)
+      const ollamaEntry = configuredProviders.find(
+        (p) => typeof p.name === 'string' && p.name.toLowerCase() === 'ollama',
+      );
+
+      let targets: ProviderTestTarget[];
+      if (testAll || !provider) {
+        targets = [...knownTargets];
+      } else {
+        const match = knownTargets.find(
+          (t) => t.name.toLowerCase() === provider.toLowerCase() || t.configName === provider.toLowerCase(),
+        );
+        targets = match ? [match] : [{ name: provider, configName: provider.toLowerCase() }];
+      }
+
+      const results: Array<{ name: string; pass: boolean; reason: string }> = [];
+
+      // Test API-key-based providers with real connectivity checks
+      for (const target of targets) {
+        const apiKey = resolveApiKey(target.configName, configuredProviders);
+        if (!apiKey) {
+          results.push({ name: target.name, pass: false, reason: 'Not configured (no API key found)' });
+          continue;
+        }
+        output.writeln(output.dim(`  Testing ${target.name}...`));
+        const result = await testProviderConnectivity(target.name, apiKey);
+        results.push({ name: target.name, pass: result.ok, reason: result.reason });
+      }
+
+      // Test Ollama separately (endpoint-based, no API key needed)
+      if (testAll || !provider || provider.toLowerCase() === 'ollama') {
+        const baseUrl = (ollamaEntry?.baseUrl as string) || 'http://localhost:11434';
+        output.writeln(output.dim(`  Testing Ollama at ${baseUrl}...`));
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch(baseUrl, { signal: controller.signal });
+          clearTimeout(timeout);
+          if (res.ok) {
+            results.push({ name: 'Ollama', pass: true, reason: `Connected at ${baseUrl}` });
+          } else {
+            results.push({ name: 'Ollama', pass: false, reason: `HTTP ${res.status} from ${baseUrl}` });
+          }
+        } catch {
+          results.push({ name: 'Ollama', pass: false, reason: `Unreachable at ${baseUrl}` });
+        }
+      }
+
+      // Also test any custom providers from config that were not in the known list
+      if (testAll || !provider) {
+        for (const cp of configuredProviders) {
+          const cpName = (cp.name as string) || '';
+          const alreadyTested = results.some(
+            (r) => r.name.toLowerCase() === cpName.toLowerCase(),
+          );
+          if (alreadyTested || !cpName) continue;
+          const apiKey = resolveApiKey(cpName, configuredProviders);
+          if (!apiKey) {
+            results.push({ name: cpName, pass: false, reason: 'No API key found' });
+          } else {
+            // For custom providers we can only verify the key exists
+            results.push({ name: cpName, pass: true, reason: 'API key found (no test endpoint available)' });
+          }
+        }
+      }
+
+      let anyPassed = false;
+      output.writeln();
+      for (const r of results) {
+        const icon = r.pass ? output.success('PASS') : output.error('FAIL');
+        output.writeln(`  ${icon}  ${r.name}: ${r.reason}`);
+        if (r.pass) anyPassed = true;
+      }
+
+      output.writeln();
+      if (results.length === 0) {
+        output.writeln(output.warning('No providers to test. Use "providers configure" to add providers.'));
+      } else if (anyPassed) {
+        output.writeln(output.success(`${results.filter((r) => r.pass).length}/${results.length} provider(s) passed.`));
+      } else {
+        output.writeln(output.warning('No providers passed connectivity checks.'));
+      }
+
+      return { success: anyPassed };
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      output.printError(`Provider test failed: ${msg}`);
+      return { success: false, exitCode: 1 };
     }
-
-    output.writeln();
-    output.printSuccess(`All ${providers.length} providers connected successfully`);
-
-    return { success: true };
   },
 };
 
@@ -163,7 +464,7 @@ const modelsCommand: Command = {
         { model: 'gpt-4-turbo', provider: 'OpenAI', capability: 'Chat', context: '128K', cost: '$0.01/$0.03' },
         { model: 'text-embedding-3-small', provider: 'OpenAI', capability: 'Embedding', context: '8K', cost: '$0.00002' },
         { model: 'text-embedding-3-large', provider: 'OpenAI', capability: 'Embedding', context: '8K', cost: '$0.00013' },
-        { model: 'all-MiniLM-L6-v2', provider: 'Transformers', capability: 'Embedding', context: '512', cost: output.success('Free') },
+        { model: 'Xenova/all-MiniLM-L6-v2', provider: 'Transformers', capability: 'Embedding', context: '512', cost: output.success('Free') },
       ],
     });
 

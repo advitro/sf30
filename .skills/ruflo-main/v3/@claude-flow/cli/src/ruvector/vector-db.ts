@@ -95,9 +95,22 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 }
 
 /**
+ * Whether the hash-embedding one-time warning has been emitted
+ */
+let hashEmbeddingWarned = false;
+
+/**
  * Generate a simple hash-based embedding (fallback when ruvector not available)
+ * WARNING: Produces deterministic vectors with NO semantic meaning.
  */
 function generateHashEmbedding(text: string, dimensions: number = 768): Float32Array {
+  if (!hashEmbeddingWarned) {
+    hashEmbeddingWarned = true;
+    console.warn(
+      '[vector-db] Using hash-based pseudo-embeddings (no semantic similarity). ' +
+      'Install ruvector or @claude-flow/embeddings for real ML embeddings.'
+    );
+  }
   const embedding = new Float32Array(dimensions);
   const normalized = text.toLowerCase().trim();
 
@@ -246,6 +259,10 @@ export async function createVectorDB(dimensions: number = 768): Promise<VectorDB
 /**
  * Generate an embedding for text
  * Uses ruvector if available, falls back to hash-based embedding
+ *
+ * @returns The embedding vector. When using hash fallback, the returned
+ *          Float32Array will have a `_warning` property (non-enumerable)
+ *          indicating it lacks semantic meaning.
  */
 export function generateEmbedding(text: string, dimensions: number = 768): Float32Array {
   if (ruvectorModule && typeof ruvectorModule.generateEmbedding === 'function') {
@@ -256,7 +273,14 @@ export function generateEmbedding(text: string, dimensions: number = 768): Float
     }
   }
 
-  return generateHashEmbedding(text, dimensions);
+  const embedding = generateHashEmbedding(text, dimensions);
+  // Tag the result so consumers can detect it came from hash fallback
+  Object.defineProperty(embedding, '_warning', {
+    value: 'hash-based pseudo-embedding — no semantic similarity',
+    enumerable: false,
+    configurable: true,
+  });
+  return embedding;
 }
 
 /**

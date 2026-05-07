@@ -462,7 +462,10 @@ export class ControllerRegistry extends EventEmitter {
       // Validate dbPath to prevent path traversal
       const dbPath = config.dbPath || ':memory:';
       if (dbPath !== ':memory:') {
-        const resolved = require('path').resolve(dbPath);
+        // Use dynamic import instead of require() — require() is not defined in ESM
+        // context and silently kills initAgentDB(), disabling all 15+ controllers (#1492).
+        const { resolve: resolvePath } = await import('node:path');
+        const resolved = resolvePath(dbPath);
         if (resolved.includes('..')) {
           this.emit('agentdb:unavailable', { reason: 'Invalid dbPath' });
           return;
@@ -744,7 +747,8 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const RB = agentdbModule.ReasoningBank;
           if (!RB) return null;
-          return new RB(this.agentdb.database);
+          const embedder = this.createEmbeddingService();
+          return new RB(this.agentdb.database, embedder);
         } catch { return null; }
       }
 

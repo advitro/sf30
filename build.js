@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Check if javascript-obfuscator is available
+process.env.JAVASCRIPT_OBFUSCATOR_DISABLE_ADS = "true";
 let JavaScriptObfuscator;
 try {
   JavaScriptObfuscator = require("javascript-obfuscator");

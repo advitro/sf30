@@ -145,16 +145,80 @@ function getSwarmStatus(swarmId?: string) {
       pending: pendingTasks
     },
     metrics: {
-      tokensUsed: 0,
-      avgResponseTime: '--',
-      successRate: totalTasks > 0 ? `${Math.round((completedTasks / totalTasks) * 100)}%` : '--',
-      elapsedTime: '--'
+      tokensUsed: (swarmState as Record<string, unknown>)?.tokensUsed as number | null ?? null,
+      avgResponseTime: (() => {
+        // Calculate average response time from task files with startedAt/completedAt
+        const taskTimesMs: number[] = [];
+        if (fs.existsSync(tasksDir)) {
+          try {
+            const taskFiles = fs.readdirSync(tasksDir).filter(f => f.endsWith('.json'));
+            for (const file of taskFiles) {
+              try {
+                const task = JSON.parse(fs.readFileSync(path.join(tasksDir, file), 'utf-8'));
+                if (task.startedAt && task.completedAt) {
+                  const elapsed = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
+                  if (elapsed > 0) taskTimesMs.push(elapsed);
+                }
+              } catch { /* skip malformed task files */ }
+            }
+          } catch { /* skip if dir unreadable */ }
+        }
+        if (taskTimesMs.length === 0) return null;
+        const avgMs = Math.round(taskTimesMs.reduce((a, b) => a + b, 0) / taskTimesMs.length);
+        return avgMs < 1000 ? `${avgMs}ms` : `${(avgMs / 1000).toFixed(1)}s`;
+      })(),
+      successRate: totalTasks > 0 ? `${Math.round((completedTasks / totalTasks) * 100)}%` : null,
+      elapsedTime: (() => {
+        // Calculate from swarm startedAt in state.json
+        const startedAt = (swarmState as Record<string, unknown>)?.startedAt as string | undefined
+          || (swarmState as Record<string, unknown>)?.initializedAt as string | undefined;
+        if (!startedAt) return null;
+        const elapsedMs = Date.now() - new Date(startedAt).getTime();
+        if (elapsedMs < 0) return null;
+        const secs = Math.floor(elapsedMs / 1000);
+        if (secs < 60) return `${secs}s`;
+        const mins = Math.floor(secs / 60);
+        const remSecs = secs % 60;
+        if (mins < 60) return `${mins}m ${remSecs}s`;
+        const hrs = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        return `${hrs}h ${remMins}m`;
+      })()
     },
-    coordination: {
-      consensusRounds: 0,
-      messagesSent: 0,
-      conflictsResolved: 0
-    },
+    coordination: (() => {
+      // Read real coordination counts from .swarm/coordination/ directory
+      const coordDir = path.join(swarmDir, 'coordination');
+      let consensusRounds = 0;
+      let messagesSent = 0;
+      let conflictsResolved = 0;
+      if (fs.existsSync(coordDir)) {
+        try {
+          const coordFiles = fs.readdirSync(coordDir).filter(f => f.endsWith('.json'));
+          for (const file of coordFiles) {
+            try {
+              const entry = JSON.parse(fs.readFileSync(path.join(coordDir, file), 'utf-8'));
+              if (entry.type === 'consensus') consensusRounds++;
+              else if (entry.type === 'message') messagesSent++;
+              else if (entry.type === 'conflict' || entry.type === 'conflict-resolution') conflictsResolved++;
+              // Also aggregate pre-counted fields if present
+              if (typeof entry.consensusRounds === 'number') consensusRounds += entry.consensusRounds;
+              if (typeof entry.messagesSent === 'number') messagesSent += entry.messagesSent;
+              if (typeof entry.conflictsResolved === 'number') conflictsResolved += entry.conflictsResolved;
+            } catch { /* skip malformed coordination files */ }
+          }
+        } catch { /* skip if dir unreadable */ }
+      }
+      // Also check state.json for aggregate coordination stats
+      if (swarmState) {
+        const coord = (swarmState as Record<string, unknown>).coordination as Record<string, number> | undefined;
+        if (coord) {
+          if (typeof coord.consensusRounds === 'number') consensusRounds += coord.consensusRounds;
+          if (typeof coord.messagesSent === 'number') messagesSent += coord.messagesSent;
+          if (typeof coord.conflictsResolved === 'number') conflictsResolved += coord.conflictsResolved;
+        }
+      }
+      return { consensusRounds, messagesSent, conflictsResolved };
+    })(),
     hasActiveSwarm: !!swarmState || totalAgents > 0
   };
 }
@@ -428,31 +492,55 @@ const startCommand: Command = {
       }
     }
 
-    output.writeln();
-    output.printInfo('Deploying agents...');
+    // Initialize swarm via MCP and persist state (#1423: was stub-only, no actual execution)
+    const swarmId = `swarm-${Date.now().toString(36)}`;
+    const totalAgents = agentPlan.reduce((sum: number, a: { count: number }) => sum + a.count, 0);
 
-    // Show deployment progress
-    const spinner = output.createSpinner({ text: 'Initializing agents...', spinner: 'dots' });
+    output.writeln();
+    const spinner = output.createSpinner({ text: 'Initializing swarm via MCP...', spinner: 'dots' });
     spinner.start();
 
-    // Brief delay for spinner animation
-    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      // Actually call MCP to initialize the swarm
+      const initResult = await callMCPTool('swarm_init', {
+        topology: 'hierarchical',
+        maxAgents: totalAgents,
+        strategy: strategy === 'development' ? 'specialized' : strategy,
+      });
+      spinner.succeed('Swarm initialized via MCP');
+    } catch (err) {
+      spinner.fail('MCP swarm_init failed — swarm metadata saved locally only');
+      output.writeln(output.dim(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+      output.writeln(output.dim('  The MCP server may not be running. Start it with: claude mcp add claude-flow npx claude-flow@v3alpha mcp start'));
+    }
 
-    spinner.succeed('All agents deployed');
+    // Persist swarm state to disk so `swarm status` can read it
+    const swarmDir = path.join(process.cwd(), '.swarm');
+    if (!fs.existsSync(swarmDir)) fs.mkdirSync(swarmDir, { recursive: true });
 
     const executionState = {
-      swarmId: `swarm-${Date.now().toString(36)}`,
+      swarmId,
       objective,
       strategy,
-      status: 'running',
-      agents: agentPlan.reduce((sum, a) => sum + a.count, 0),
+      status: 'initialized',
+      agents: totalAgents,
+      agentPlan,
       startedAt: new Date().toISOString(),
       parallel: ctx.flags.parallel ?? true
     };
 
+    fs.writeFileSync(
+      path.join(swarmDir, 'state.json'),
+      JSON.stringify(executionState, null, 2)
+    );
+
     output.writeln();
-    output.printSuccess('Swarm execution started');
-    output.writeln(output.dim(`  Monitor: claude-flow swarm status ${executionState.swarmId}`));
+    output.printSuccess(`Swarm ${swarmId} initialized with ${totalAgents} agent slots`);
+    output.writeln(output.dim('  This CLI coordinates agent state. Execution happens via:'));
+    output.writeln(output.dim('  - Claude Code Agent tool (interactive)'));
+    output.writeln(output.dim('  - claude -p (headless background)'));
+    output.writeln(output.dim('  - hive-mind spawn --claude (autonomous)'));
+    output.writeln(output.dim(`  Monitor: claude-flow swarm status ${swarmId}`));
 
     return { success: true, data: executionState };
   }
@@ -530,10 +618,10 @@ const statusCommand: Command = {
     // Metrics
     output.writeln(output.bold('Performance Metrics'));
     output.printList([
-      `Tokens Used: ${status.metrics.tokensUsed.toLocaleString()}`,
-      `Avg Response Time: ${status.metrics.avgResponseTime}`,
-      `Success Rate: ${status.metrics.successRate}`,
-      `Elapsed Time: ${status.metrics.elapsedTime}`
+      `Tokens Used: ${status.metrics.tokensUsed != null ? status.metrics.tokensUsed.toLocaleString() : output.dim('unknown')}`,
+      `Avg Response Time: ${status.metrics.avgResponseTime ?? output.dim('no data')}`,
+      `Success Rate: ${status.metrics.successRate ?? output.dim('no data')}`,
+      `Elapsed Time: ${status.metrics.elapsedTime ?? output.dim('no data')}`
     ]);
 
     output.writeln();
@@ -592,11 +680,26 @@ const stopCommand: Command = {
 
     output.printInfo(`Stopping swarm ${swarmId}...`);
 
-    if (!force) {
-      output.writeln(output.dim('  Completing in-progress tasks...'));
-      output.writeln(output.dim('  Saving coordination state...'));
-      output.writeln(output.dim('  Notifying agents...'));
-      output.writeln(output.dim('  Saving memory state...'));
+    // Update persisted swarm state if it exists (#1423)
+    const swarmStateFile = path.join(process.cwd(), '.swarm', 'state.json');
+    if (fs.existsSync(swarmStateFile)) {
+      try {
+        const state = JSON.parse(fs.readFileSync(swarmStateFile, 'utf-8'));
+        state.status = 'stopped';
+        state.stoppedAt = new Date().toISOString();
+        fs.writeFileSync(swarmStateFile, JSON.stringify(state, null, 2));
+        output.writeln(output.dim('  Swarm state updated'));
+      } catch {
+        output.writeln(output.dim('  Could not update swarm state file'));
+      }
+    }
+
+    // Attempt MCP cleanup
+    try {
+      await callMCPTool('swarm_stop', { swarmId, force });
+      output.writeln(output.dim('  MCP swarm stopped'));
+    } catch {
+      // MCP may not be available
     }
 
     output.printSuccess(`Swarm ${swarmId} stopped`);
@@ -641,8 +744,17 @@ const scaleCommand: Command = {
 
     output.printInfo(`Scaling swarm ${swarmId} to ${targetAgents} agents...`);
 
-    // Calculate scaling delta
-    const currentAgents = 8;
+    // Calculate scaling delta — fetch actual count instead of hardcoded 8 (#1425)
+    const { callMCPTool } = await import('../mcp-client.js');
+    let currentAgents = 0;
+    try {
+      const statusResult = await callMCPTool('swarm_status', {});
+      const statusData = typeof statusResult === 'string' ? JSON.parse(statusResult) : statusResult;
+      currentAgents = statusData?.agentCount ?? statusData?.agents?.length ?? 0;
+    } catch {
+      // If MCP unavailable, fall back to 0 (will spawn all requested agents)
+      currentAgents = 0;
+    }
     const delta = targetAgents - currentAgents;
 
     if (delta > 0) {
@@ -717,14 +829,22 @@ const coordinateCommand: Command = {
       data: v3Agents
     });
 
+    // Actually initialize via MCP instead of just displaying (#1423)
     output.writeln();
-    output.printInfo('Performance Targets:');
-    output.printList([
-      `Flash Attention: ${output.success('2.49x-7.47x speedup')}`,
-      `AgentDB Search: ${output.success('150x-12,500x improvement')}`,
-      `Memory Reduction: ${output.success('50-75%')}`,
-      `Code Reduction: ${output.success('<5,000 lines')}`
-    ]);
+    try {
+      await callMCPTool('swarm_init', {
+        topology: 'hierarchical-mesh',
+        maxAgents: agentCount,
+        strategy: 'specialized',
+      });
+      output.printSuccess(`Swarm coordination initialized with ${agentCount} agent slots via MCP`);
+    } catch {
+      output.printWarning('MCP unavailable — showing agent plan only (no active coordination)');
+    }
+
+    output.writeln();
+    output.writeln(output.dim('Note: Use Claude Code Task tool or hive-mind spawn --claude to'));
+    output.writeln(output.dim('drive actual agent execution. This command sets up the topology.'));
 
     return { success: true, data: { agents: v3Agents, count: agentCount } };
   }

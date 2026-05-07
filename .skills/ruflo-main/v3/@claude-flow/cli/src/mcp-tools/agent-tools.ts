@@ -7,7 +7,8 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
+import { validateIdentifier, validateText, validateAgentSpawn } from './validate-input.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -28,6 +29,7 @@ interface AgentRecord {
   domain?: string;
   model?: ClaudeModel;  // Model assigned to this agent
   modelRoutedBy?: 'explicit' | 'router' | 'agent-booster' | 'default';  // How model was determined (ADR-026)
+  lastResult?: Record<string, unknown>;  // Output from last completed task
 }
 
 interface AgentStore {
@@ -36,7 +38,7 @@ interface AgentStore {
 }
 
 function getAgentDir(): string {
-  return join(process.cwd(), STORAGE_DIR, AGENT_DIR);
+  return join(getProjectCwd(), STORAGE_DIR, AGENT_DIR);
 }
 
 function getAgentPath(): string {
@@ -196,6 +198,12 @@ export const agentTools: MCPTool[] = [
       required: ['agentType'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425: wire security validators to runtime)
+      const validation = await validateAgentSpawn(input);
+      if (!validation.valid) {
+        return { success: false, error: `Input validation failed: ${validation.errors.join('; ')}` };
+      }
+
       const store = loadAgentStore();
       const agentId = (input.agentId as string) || `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const agentType = input.agentType as string;
@@ -232,6 +240,12 @@ export const agentTools: MCPTool[] = [
       store.agents[agentId] = agent;
       saveAgentStore(store);
 
+      // Record agent in graph database (ADR-087, best-effort)
+      try {
+        const { addNode } = await import('../ruvector/graph-backend.js');
+        await addNode({ id: agentId, type: 'agent', name: agentType });
+      } catch { /* graph-node not available */ }
+
       // Include Agent Booster routing info if applicable
       const response: Record<string, unknown> = {
         success: true,
@@ -239,8 +253,9 @@ export const agentTools: MCPTool[] = [
         agentType: agent.agentType,
         model: agent.model,
         modelRoutedBy: routingResult.routedBy,
-        status: 'spawned',
+        status: 'registered',
         createdAt: agent.createdAt,
+        note: 'Agent registered for coordination. Use Claude Code Task tool or claude -p to execute work.',
       };
 
       // Add Agent Booster info if task can skip LLM
@@ -269,6 +284,9 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
+      const v = validateIdentifier(input.agentId, 'agentId');
+      if (!v.valid) return { success: false, error: `Input validation failed: ${v.error}` };
+
       const store = loadAgentStore();
       const agentId = input.agentId as string;
 
@@ -302,6 +320,9 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
+      const v = validateIdentifier(input.agentId, 'agentId');
+      if (!v.valid) return { agentId: input.agentId, status: 'not_found', error: `Input validation failed: ${v.error}` };
+
       const store = loadAgentStore();
       const agentId = input.agentId as string;
       const agent = store.agents[agentId];
@@ -315,6 +336,7 @@ export const agentTools: MCPTool[] = [
           taskCount: agent.taskCount,
           createdAt: agent.createdAt,
           domain: agent.domain,
+          lastResult: agent.lastResult || null,
         };
       }
 
@@ -338,6 +360,15 @@ export const agentTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      if (input.status) {
+        const v = validateIdentifier(input.status, 'status');
+        if (!v.valid) return { agents: [], total: 0, error: `Input validation failed: ${v.error}` };
+      }
+      if (input.domain) {
+        const v = validateIdentifier(input.domain, 'domain');
+        if (!v.valid) return { agents: [], total: 0, error: `Input validation failed: ${v.error}` };
+      }
+
       const store = loadAgentStore();
       let agents = Object.values(store.agents);
 
@@ -386,6 +417,11 @@ export const agentTools: MCPTool[] = [
       required: ['action'],
     },
     handler: async (input) => {
+      if (input.agentType) {
+        const v = validateIdentifier(input.agentType, 'agentType');
+        if (!v.valid) return { action: input.action, error: `Input validation failed: ${v.error}` };
+      }
+
       const store = loadAgentStore();
       const agents = Object.values(store.agents).filter(a => a.status !== 'terminated');
       const action = (input.action as string) || 'status';  // Default to status
@@ -501,6 +537,11 @@ export const agentTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      if (input.agentId) {
+        const v = validateIdentifier(input.agentId, 'agentId');
+        if (!v.valid) return { agentId: input.agentId, error: `Input validation failed: ${v.error}` };
+      }
+
       const store = loadAgentStore();
       const agents = Object.values(store.agents).filter(a => a.status !== 'terminated');
       const threshold = (input.threshold as number) || 0.5;
@@ -524,8 +565,6 @@ export const agentTools: MCPTool[] = [
       const degradedAgents = agents.filter(a => a.health >= 0.3 && a.health < threshold);
       const unhealthyAgents = agents.filter(a => a.health < 0.3);
       const avgHealth = agents.length > 0 ? agents.reduce((sum, a) => sum + a.health, 0) / agents.length : 1;
-      const avgCpu = agents.length > 0 ? 35 + Math.random() * 30 : 0; // Simulated CPU
-      const avgMemory = avgHealth * 0.6; // Correlated with health
 
       return {
         // CLI expected fields
@@ -536,19 +575,17 @@ export const agentTools: MCPTool[] = [
             type: a.agentType,
             health: a.health >= threshold ? 'healthy' : (a.health >= 0.3 ? 'degraded' : 'unhealthy'),
             uptime,
-            memory: { used: Math.floor(256 * (1 - a.health * 0.3)), limit: 512 },
-            cpu: 20 + Math.floor(a.health * 40),
             tasks: { active: a.taskCount > 0 ? 1 : 0, queued: 0, completed: a.taskCount, failed: 0 },
-            latency: { avg: 50 + Math.floor((1 - a.health) * 100), p99: 150 + Math.floor((1 - a.health) * 200) },
-            errors: { count: a.health < threshold ? 1 : 0 },
+            _note: 'Per-agent OS metrics not available — use system_metrics for real CPU/memory',
           };
         }),
         overall: {
           healthy: healthyAgents.length,
           degraded: degradedAgents.length,
           unhealthy: unhealthyAgents.length,
-          avgCpu,
-          avgMemory,
+          cpu: null,
+          memory: null,
+          _note: 'Per-agent CPU/memory not available — use system_metrics for real OS-level stats',
           score: Math.round(avgHealth * 100),
           issues: unhealthyAgents.length,
         },
@@ -582,6 +619,13 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
+      const v = validateIdentifier(input.agentId, 'agentId');
+      if (!v.valid) return { success: false, agentId: input.agentId, error: `Input validation failed: ${v.error}` };
+      if (input.status) {
+        const vs = validateIdentifier(input.status, 'status');
+        if (!vs.valid) return { success: false, agentId: input.agentId, error: `Input validation failed: ${vs.error}` };
+      }
+
       const store = loadAgentStore();
       const agentId = input.agentId as string;
       const agent = store.agents[agentId];
