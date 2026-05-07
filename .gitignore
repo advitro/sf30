@@ -5,6 +5,8 @@ node_modules/
 
 # Generated customer packages
 Deploy/shift-grabber-v9.zip
+SF30-GOD.zip
+SF30-GOD/dist/
 
 .vercel/
 .vercel

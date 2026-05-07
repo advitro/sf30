@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SF30-GOD</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- ── CONSENT MODAL ── -->
+    <div id="consentModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="consentTitle">
+      <div class="modal">
+        <h2 id="consentTitle" class="modal-title">Privacy Consent</h2>
+        <p class="modal-body">
+          Shift Grabber needs to verify your license and communicate with our servers.
+          We collect: device fingerprint (for security), license key, and usage timestamps.
+        </p>
+        <div class="modal-actions">
+          <button id="consentAcceptBtn" class="btn full" aria-label="Accept and continue using Shift Grabber">Accept &amp; Continue</button>
+          <button id="consentDeclineBtn" class="btn ghost full" aria-label="Decline and disable extension">Decline</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PINNED HEADER (always visible) ── -->
+    <header class="pinned-header" role="banner">
+      <div class="header-row">
+        <div class="brand">SF30 <span class="version" style="color:#ef4444;font-weight:800;">· GOD</span> <span id="tierBadge" class="tier-badge hidden"></span></div>
+        <div id="statusBadge" class="badge off" aria-live="polite" aria-atomic="true">OFF</div>
+      </div>
+
+      <div class="license-row">
+        <input id="licenseInput" type="text" value="GOD-MODE" class="license-input" disabled style="opacity:0.5;text-align:center;font-weight:700;color:#ef4444;" aria-label="License key" />
+        <button id="verifyBtn" class="btn" disabled style="opacity:0.5;" aria-label="Verify">GOD</button>
+      </div>
+      <div id="licenseStatus" class="status-text" aria-live="polite" aria-atomic="true">Enter key to activate</div>
+
+      <div class="master-toggle-row">
+        <div class="master-toggle-labels">
+          <div class="master-toggle-title">Shift Grabber</div>
+          <div class="master-toggle-desc" id="toggleDesc">GOD MODE — flip to start</div>
+        </div>
+        <label class="switch switch-big" aria-label="Enable Shift Grabber">
+          <input id="masterToggle" type="checkbox" role="switch">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="subscription-row">
+        <div id="licenseStatusRow" class="status-text" aria-live="polite" aria-atomic="true">Enter key to activate</div>
+        <div id="tierDetail" class="helper"></div>
+      </div>
+    </header>
+
+    <!-- ── TAB NAVIGATION ── -->
+    <nav class="tab-nav" role="tablist" aria-label="Extension sections">
+      <button id="tabShifts" class="tab-btn active" role="tab" aria-selected="true" aria-controls="panelShifts" tabindex="0">Shifts</button>
+      <button id="tabControls" class="tab-btn" role="tab" aria-selected="false" aria-controls="panelControls" tabindex="-1">Controls</button>
+      <button id="tabSettings" class="tab-btn" role="tab" aria-selected="false" aria-controls="panelSettings" tabindex="-1">Settings</button>
+    </nav>
+
+    <!-- ── TAB PANELS ── -->
+    <div class="tab-panels">
+
+      <!-- Shifts -->
+      <section id="panelShifts" class="tab-panel active" role="tabpanel" aria-labelledby="tabShifts">
+        <div class="card" aria-labelledby="titleDates">
+          <div class="section-title" id="titleDates">Open Date Tabs</div>
+          <div class="row-input">
+            <input id="dateInput" type="date" aria-label="Select date to add" aria-describedby="datesHelp" />
+            <button id="addDateBtn" class="btn" aria-label="Add selected date">Add</button>
+          </div>
+          <div id="datesList" class="dates-list empty" aria-label="Selected dates">No dates selected</div>
+          <div class="actions">
+            <button id="clearDatesBtn" class="btn ghost" aria-label="Clear all dates">Clear</button>
+            <button id="openDatesNowBtn" class="btn" aria-label="Open all selected dates">Open Now</button>
+          </div>
+          <div id="datesHelp" class="helper">Selected dates open in new tabs when you start.</div>
+        </div>
+
+        <div class="card" aria-labelledby="titleBlacklist">
+          <div class="section-title" id="titleBlacklist">Blacklist Dates (Skip These)</div>
+          <div class="row-input">
+            <input id="blacklistDateInput" type="date" aria-label="Select blacklist date" aria-describedby="blacklistHelp" />
+            <button id="addBlacklistDateBtn" class="btn" aria-label="Add blacklist date">Add</button>
+          </div>
+          <div id="blacklistDatesList" class="dates-list empty" aria-label="Blacklisted dates">No blacklist (grab all)</div>
+          <div class="actions">
+            <button id="clearBlacklistDatesBtn" class="btn ghost" aria-label="Clear all blacklist dates">Clear</button>
+            <button id="applyBlacklistDatesBtn" class="btn" aria-label="Apply blacklist">Apply</button>
+          </div>
+          <div id="blacklistHelp" class="helper">Skip shifts on blacklist dates. Window auto-sets to 7 days from open tab's date.</div>
+        </div>
+      </section>
+
+      <!-- Controls -->
+      <section id="panelControls" class="tab-panel" role="tabpanel" aria-labelledby="tabControls" hidden>
+        <div class="card" aria-labelledby="titleShortcuts">
+          <div class="section-title" id="titleShortcuts">Quick Controls</div>
+          <div class="actions grid-2">
+            <button id="pauseToggleBtn" class="btn" aria-label="Toggle pause">Pause (P)</button>
+            <button id="overrideToggleBtn" class="btn" aria-label="Toggle override speed">Override (⇧O)</button>
+            <button id="hideHudBtn" class="btn ghost" aria-label="Toggle HUD visibility">Toggle HUD (⇧H)</button>
+            <button id="reloadNowBtn" class="btn ghost" aria-label="Reload all tabs now">Reload Now (R)</button>
+          </div>
+          <div class="helper">Shortcuts work on all open AtoZ tabs.</div>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section id="panelSettings" class="tab-panel" role="tabpanel" aria-labelledby="tabSettings" hidden>
+        <div class="card" aria-labelledby="titleTelegram">
+          <div class="section-title" id="titleTelegram">Telegram Notifications</div>
+          <div class="row-input">
+            <input id="tgBotTokenInput" type="text" placeholder="Bot token from @BotFather" aria-label="Telegram bot token" />
+          </div>
+          <div class="row-input">
+            <input id="tgChatIdInput" type="text" placeholder="Chat ID (e.g. -1001234567890)" aria-label="Telegram chat ID" />
+          </div>
+          <button id="tgSaveBtn" class="btn full" aria-label="Save Telegram configuration">Save Telegram Config</button>
+          <div class="row" style="margin-top:12px;">
+            <div class="telegram-status" id="telegramStatus">Not configured</div>
+            <label class="switch" aria-label="Enable Telegram alerts">
+              <input id="tgOptOutToggle" type="checkbox" role="switch">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="helper" id="telegramHelp">Create a bot with @BotFather, paste the token and your chat ID above.</div>
+        </div>
+
+        <div class="card" aria-labelledby="titleData">
+          <div class="section-title" id="titleData">Data &amp; Privacy</div>
+          <button id="exportDataBtn" class="btn full" aria-label="Export my data">Export My Data (GDPR)</button>
+          <button id="deleteDataBtn" class="btn ghost full" style="margin-top:8px;" aria-label="Delete all my data">Delete All My Data</button>
+          <div class="helper" style="margin-top:6px;">Download all data stored by this extension or permanently delete it.</div>
+        </div>
+
+        <div class="card" aria-labelledby="titleContact">
+          <div class="section-title" id="titleContact">Support</div>
+          <button id="contactBtn" class="btn full" aria-label="Contact support">Contact Us</button>
+        </div>
+      </section>
+
+    </div>
+
+    <footer>SF30-GOD · Maximum Performance · All tabs sync</footer>
+  </div>
+
+  <script src="popup.bundle.js"></script>
+</body>
+</html>

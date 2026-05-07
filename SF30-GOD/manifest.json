@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "SF30-GOD",
+  "version": "9.9.9",
+  "description": "God Mode — maximum performance shift grabber. Pre-activated, zero delays, aggressive claiming. For personal use only.",
+  "permissions": ["tabs", "storage", "scripting", "alarms"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://atoz.amazon.work https://atoz-apps.amazon.work https://api.telegram.org"
+  },
+  "host_permissions": [
+    "https://atoz.amazon.work/*",
+    "https://atoz-apps.amazon.work/*",
+
+    "https://api.telegram.org/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "action": {
+    "default_title": "SF30-GOD",
+    "default_popup": "popup/index.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sounds/click.mp3"],
+      "matches": ["https://atoz.amazon.work/*"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://atoz.amazon.work/*"],
+      "js": ["src/content/content-isolated.bundle.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://atoz.amazon.work/*"],
+      "js": ["src/content/content-main.bundle.js"],
+      "run_at": "document_end",
+      "world": "MAIN",
+      "all_frames": false
+    }
+  ]
+}
