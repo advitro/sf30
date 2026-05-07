@@ -50,7 +50,7 @@
 
   function getCsrf(force) {
     var now = Date.now();
-    if (!force && cachedCsrf && (now - csrfTs) < 60000) {return cachedCsrf;}
+    if (!force && cachedCsrf && (now - csrfTs) < SG_CONSTS.TIMING.CSRF_CACHE_TTL_MS) {return cachedCsrf;}
     try {
       var m = document.cookie.match(/anti-csrftoken-a2z=([^;]+)/);
       if (m) { cachedCsrf = decodeURIComponent(m[1]); csrfTs = now; return cachedCsrf; }
@@ -243,7 +243,7 @@
         rateLimited = false;
         consecutiveErrors = 0;
         pollInterval = baseInterval;
-        backoffMs = 5000; // reset for next burst
+        backoffMs = SG_CONSTS.TIMING.RATE_LIMIT_POLL_MS; // reset for next burst
         window.postMessage({ sg: 1, type: 'SG_RATE_LIMITED', limited: false, secret: SG_CONSTS.MSG_SECRET }, '*');
       }, backoffMs);
     }
@@ -334,7 +334,7 @@
       injectDecoyInteraction();
       pollOnce().then(function () {
         var delay = poissonDelay(pollInterval);
-        pollTimer = setTimeout(loop, Math.max(300, delay));
+        pollTimer = setTimeout(loop, Math.max(SG_CONSTS.TIMING.POLL_INTERVAL_MS, delay));
       });
     }
     loop();

@@ -685,8 +685,8 @@ window.addEventListener("keydown", (e) => {
     {chrome.runtime.sendMessage({ type: "SG_RELOAD_ALL_NOW" });}
   if (e.shiftKey && e.code === "KeyT" && !e.ctrlKey && !e.altKey) {
     turboMode = !turboMode;
-    setApiSpeed(turboMode ? 500 : 1000);
-    console.log("[ShiftGrabber] TURBO MODE:", turboMode ? "ON — 500ms polling" : "OFF — 1s polling");
+    setApiSpeed(turboMode ? SG_CONSTS.TIMING.TURBO_POLL_INTERVAL_MS : SG_CONSTS.TIMING.POLL_INTERVAL_MS);
+    console.log("[ShiftGrabber] TURBO MODE:", turboMode ? "ON - " + SG_CONSTS.TIMING.TURBO_POLL_INTERVAL_MS + "ms polling" : "OFF - " + SG_CONSTS.TIMING.POLL_INTERVAL_MS + "ms polling");
   }
 });
 
@@ -769,8 +769,8 @@ async function sendTelegramLogForDate(date) {
 
 // --- control api-layer polling from main.js ---
 function startApiPolling() {
-  // Tell api-layer to start polling at default speed
-  const interval = turboMode ? 500 : 1000;
+  // Tell api-layer to start polling at GOD mode speed
+  const interval = turboMode ? SG_CONSTS.TIMING.TURBO_POLL_INTERVAL_MS : SG_CONSTS.TIMING.POLL_INTERVAL_MS;
   const tabWindow = getTabDateWindow(); // Get 7-day window from this tab's date
   window.postMessage({ sg: true, type: 'SG_START_POLLING', interval, tabWindow, secret: SG_CONSTS.MSG_SECRET }, '*');
 }
